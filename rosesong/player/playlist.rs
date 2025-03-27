@@ -10,6 +10,8 @@ use tokio::sync::RwLock;
 pub struct Track {
     pub bvid: String,
     pub cid: String,
+    title: String,
+    owner: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
