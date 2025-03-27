@@ -99,6 +99,8 @@ struct AddCommand {
     fid: Option<String>,
     #[arg(short = 'b', long = "bvid", help = "要导入的 bvid")]
     bvid: Option<String>,
+    #[arg(short = 'c', long = "cid", help = "要导入的合集 ID")]
+    cid: Option<String>,
 }
 
 #[derive(Parser)]
@@ -155,7 +157,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         Commands::Previous => handle_previous_command(&proxy).await,
         Commands::Stop => handle_stop_command(&proxy).await,
         Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
-        Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, &proxy).await,
+        Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.cid, &proxy).await,
         Commands::Delete(delete_cmd) => {
             delete_tracks(
                 delete_cmd.bvid,
@@ -316,11 +318,12 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 async fn add_tracks(
     fid: Option<String>,
     bvid: Option<String>,
+    cid: Option<String>,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    import_favorite_or_bvid(fid, bvid).await?;
+    import_favorite_or_bvid_or_cid(fid, bvid, cid).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     if old_content != new_content {
         if let Ok(is_running) = is_rosesong_running(proxy).await {
@@ -332,11 +335,16 @@ async fn add_tracks(
     Ok(())
 }
 
-async fn import_favorite_or_bvid(fid: Option<String>, bvid: Option<String>) -> StdResult<()> {
+async fn import_favorite_or_bvid_or_cid(
+    fid: Option<String>,
+    bvid: Option<String>,
+    cid: Option<String>,
+) -> StdResult<()> {
     let client = reqwest::Client::new();
     let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
     println!("正在获取相关信息");
-    let video_data_list = get_video_data(&client, fid.as_deref(), bvid.as_deref()).await?;
+    let video_data_list =
+        get_video_data(&client, fid.as_deref(), bvid.as_deref(), cid.as_deref()).await?;
     let mut new_tracks = Vec::new();
     for video_data in video_data_list {
         new_tracks.push(Track {
@@ -348,32 +356,26 @@ async fn import_favorite_or_bvid(fid: Option<String>, bvid: Option<String>) -> S
     }
 
     let mut current = 0;
-    let mut existing_tracks = Vec::new();
+    let mut tracks = Vec::new();
     if Path::new(&playlist_path).exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
         let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
         current = playlist.current;
-        existing_tracks.extend(playlist.tracks);
+        tracks.extend(playlist.tracks);
     }
 
-    let existing_bvids: HashSet<_> = existing_tracks
-        .iter()
-        .map(|track| track.bvid.clone())
-        .collect();
-    for track in &mut existing_tracks {
+    let existing_bvids: HashSet<_> = tracks.iter().map(|track| track.bvid.clone()).collect();
+    for track in &mut tracks {
         if let Some(new_track) = new_tracks.iter().find(|t| t.bvid == track.bvid) {
             *track = new_track.clone();
         }
     }
     for new_track in new_tracks {
         if !existing_bvids.contains(&new_track.bvid) {
-            existing_tracks.push(new_track);
+            tracks.push(new_track);
         }
     }
-    let playlist = Playlist {
-        current,
-        tracks: existing_tracks,
-    };
+    let playlist = Playlist { current, tracks };
     let toml_content = toml::to_string(&playlist)
         .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
     let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;

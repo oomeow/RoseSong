@@ -104,7 +104,7 @@ pub async fn move_to_next_track(play_mode: PlayMode) -> Result<usize, App> {
     let mut playlist = PLAYLIST.write().await;
     let playlist = playlist.as_mut().map_err(|e| e.clone())?;
     let index = playlist.move_to_next_track(play_mode)?;
-    save_playlist(&playlist).await?;
+    save_playlist(playlist).await?;
     Ok(index)
 }
 
@@ -112,7 +112,7 @@ pub async fn move_to_previous_track(play_mode: PlayMode) -> Result<usize, App> {
     let mut playlist = PLAYLIST.write().await;
     let playlist = playlist.as_mut().map_err(|e| e.clone())?;
     let index = playlist.move_to_previous_track(play_mode)?;
-    save_playlist(&playlist).await?;
+    save_playlist(playlist).await?;
     Ok(index)
 }
 
@@ -120,7 +120,7 @@ pub async fn set_current_track_index(index: usize) -> Result<(), App> {
     let mut playlist = PLAYLIST.write().await;
     let playlist = playlist.as_mut().map_err(|e| e.clone())?;
     playlist.current = index;
-    save_playlist(&playlist).await?;
+    save_playlist(playlist).await?;
     Ok(())
 }
 

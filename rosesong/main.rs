@@ -80,7 +80,7 @@ async fn main() -> Result<(), App> {
 
     load(&playlist_path).await?;
     let (stop_sender, stop_receiver) = watch::channel(());
-    let _audio_player = start_player_and_dbus_listener(stop_sender).await?;
+    let _audio_player = start_player_and_dbus_listener(&stop_sender)?;
     wait_for_stop_signal(stop_receiver).await;
     process::exit(0);
 }
@@ -110,11 +110,11 @@ async fn start_temp_dbus_listener(
     Ok(())
 }
 
-async fn start_player_and_dbus_listener(stop_signal: watch::Sender<()>) -> Result<Audio, App> {
+fn start_player_and_dbus_listener(stop_signal: &watch::Sender<()>) -> Result<Audio, App> {
     let play_mode = PlayMode::Loop;
     let (command_sender, command_receiver) = mpsc::channel(1);
 
-    let audio_player = Audio::new(play_mode, Arc::new(Mutex::new(command_receiver))).await?;
+    let audio_player = Audio::new(play_mode, Arc::new(Mutex::new(command_receiver)))?;
 
     task::spawn({
         let command_sender = command_sender.clone();

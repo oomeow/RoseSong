@@ -27,6 +27,7 @@ flexi_logger = "0.29"
 futures-util = "0.3"
 glib = "0.20"
 gstreamer = "0.23"
+indicatif = "0.17.11"
 log = "0.4"
 rand = "0.9"
 reqwest = { version = "0.12", features = ["json", "stream"] }

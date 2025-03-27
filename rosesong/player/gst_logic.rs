@@ -36,7 +36,7 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub async fn new(
+    pub fn new(
         play_mode: PlayMode,
         command_receiver: Arc<Mutex<mpsc::Receiver<Command>>>,
     ) -> Result<Self, App> {
