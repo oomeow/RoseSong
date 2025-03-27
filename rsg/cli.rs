@@ -133,8 +133,9 @@ struct Track {
     owner: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct Playlist {
+    current: usize,
     tracks: Vec<Track>,
 }
 
@@ -345,12 +346,16 @@ async fn import_favorite_or_bvid(fid: Option<String>, bvid: Option<String>) -> S
             owner: video_data.owner.name.clone(),
         });
     }
-    let mut existing_tracks = if Path::new(&playlist_path).exists() {
+
+    let mut current = 0;
+    let mut existing_tracks = Vec::new();
+    if Path::new(&playlist_path).exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-        toml::from_str::<Playlist>(&content).map_or_else(|_| Vec::new(), |playlist| playlist.tracks)
-    } else {
-        Vec::new()
-    };
+        let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
+        current = playlist.current;
+        existing_tracks.extend(playlist.tracks);
+    }
+
     let existing_bvids: HashSet<_> = existing_tracks
         .iter()
         .map(|track| track.bvid.clone())
@@ -366,6 +371,7 @@ async fn import_favorite_or_bvid(fid: Option<String>, bvid: Option<String>) -> S
         }
     }
     let playlist = Playlist {
+        current,
         tracks: existing_tracks,
     };
     let toml_content = toml::to_string(&playlist)

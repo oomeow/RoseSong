@@ -112,15 +112,9 @@ async fn start_temp_dbus_listener(
 
 async fn start_player_and_dbus_listener(stop_signal: watch::Sender<()>) -> Result<Audio, App> {
     let play_mode = PlayMode::Loop;
-    let initial_track_index = 0;
     let (command_sender, command_receiver) = mpsc::channel(1);
 
-    let audio_player = Audio::new(
-        play_mode,
-        initial_track_index,
-        Arc::new(Mutex::new(command_receiver)),
-    )
-    .await?;
+    let audio_player = Audio::new(play_mode, Arc::new(Mutex::new(command_receiver))).await?;
 
     task::spawn({
         let command_sender = command_sender.clone();

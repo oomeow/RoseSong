@@ -1,19 +1,20 @@
 use crate::error::App;
 use rand::rng;
 use rand::seq::IteratorRandom;
-use serde::Deserialize;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Track {
     pub bvid: String,
     pub cid: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Playlist {
+    pub current: usize,
     pub tracks: Vec<Track>,
 }
 
@@ -33,7 +34,7 @@ impl Playlist {
     }
 
     pub fn move_to_next_track(&mut self, play_mode: PlayMode) -> Result<usize, App> {
-        let current_index = CURRENT_TRACK_INDEX.load(Ordering::SeqCst);
+        let current_index = self.current;
         let new_index = match play_mode {
             PlayMode::Loop => (current_index + 1) % self.tracks.len(),
             PlayMode::Shuffle => {
@@ -44,12 +45,12 @@ impl Playlist {
             }
             PlayMode::Repeat => current_index,
         };
-        CURRENT_TRACK_INDEX.store(new_index, Ordering::SeqCst);
+        self.current = new_index;
         Ok(new_index)
     }
 
     pub fn move_to_previous_track(&mut self, play_mode: PlayMode) -> Result<usize, App> {
-        let current_index = CURRENT_TRACK_INDEX.load(Ordering::SeqCst);
+        let current_index = self.current;
         let new_index = match play_mode {
             PlayMode::Loop => {
                 if current_index == 0 {
@@ -66,7 +67,7 @@ impl Playlist {
             }
             PlayMode::Repeat => current_index,
         };
-        CURRENT_TRACK_INDEX.store(new_index, Ordering::SeqCst);
+        self.current = new_index;
         Ok(new_index)
     }
 
@@ -75,9 +76,13 @@ impl Playlist {
     }
 }
 
-pub static PLAYLIST: LazyLock<RwLock<Result<Playlist, App>>> =
-    LazyLock::new(|| RwLock::new(Ok(Playlist { tracks: Vec::new() })));
-pub static CURRENT_TRACK_INDEX: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
+pub static PLAYLIST: LazyLock<RwLock<Result<Playlist, App>>> = LazyLock::new(|| {
+    RwLock::new(Ok(Playlist {
+        current: 0,
+        tracks: Vec::new(),
+    }))
+});
+// pub static CURRENT_TRACK_INDEX: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
 
 pub async fn load(file_path: &str) -> Result<(), App> {
     let playlist = Playlist::load_from_file(file_path).await?;
@@ -89,24 +94,47 @@ pub async fn load(file_path: &str) -> Result<(), App> {
 pub async fn get_current_track() -> Result<Track, App> {
     let playlist = PLAYLIST.read().await;
     let playlist = playlist.as_ref().map_err(std::clone::Clone::clone)?;
-    let index = CURRENT_TRACK_INDEX.load(Ordering::SeqCst);
+    let index = playlist.current;
     playlist.get_current_track(index)
 }
 
 pub async fn move_to_next_track(play_mode: PlayMode) -> Result<usize, App> {
     let mut playlist = PLAYLIST.write().await;
     let playlist = playlist.as_mut().map_err(|e| e.clone())?;
-    playlist.move_to_next_track(play_mode)
+    let index = playlist.move_to_next_track(play_mode)?;
+    save_playlist(&playlist).await?;
+    Ok(index)
 }
 
 pub async fn move_to_previous_track(play_mode: PlayMode) -> Result<usize, App> {
     let mut playlist = PLAYLIST.write().await;
     let playlist = playlist.as_mut().map_err(|e| e.clone())?;
-    playlist.move_to_previous_track(play_mode)
+    let index = playlist.move_to_previous_track(play_mode)?;
+    save_playlist(&playlist).await?;
+    Ok(index)
 }
 
 pub async fn set_current_track_index(index: usize) -> Result<(), App> {
-    CURRENT_TRACK_INDEX.store(index, Ordering::SeqCst);
+    let mut playlist = PLAYLIST.write().await;
+    let playlist = playlist.as_mut().map_err(|e| e.clone())?;
+    playlist.current = index;
+    save_playlist(&playlist).await?;
+    Ok(())
+}
+
+pub async fn save_playlist(playlist: &Playlist) -> Result<(), App> {
+    let playlist_path = format!(
+        "{}/.config/rosesong/playlists/playlist.toml",
+        std::env::var("HOME").expect("Failed to get HOME environment variable")
+    );
+    let toml_content = toml::to_string(playlist)
+        .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
+    let mut file = tokio::fs::File::create(&playlist_path)
+        .await
+        .map_err(|_| App::Io("Failed to create playlist file".to_string()))?;
+    file.write_all(toml_content.as_bytes())
+        .await
+        .map_err(|_| App::Io("Failed to write playlist file".to_string()))?;
     Ok(())
 }
 
