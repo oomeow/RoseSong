@@ -203,9 +203,9 @@ async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -
 
 async fn handle_pause_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
-        eprintln!("rosesong 没有处于运行状态");
+        println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        eprintln!("当前播放列表为空，请先添加歌曲");
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else {
         proxy.pause().await?;
         println!("暂停播放");
@@ -215,9 +215,9 @@ async fn handle_pause_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 
 async fn handle_next_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
-        eprintln!("rosesong 没有处于运行状态");
+        println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        eprintln!("当前播放列表为空，请先添加歌曲");
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else {
         proxy.next().await?;
         println!("播放下一首");
@@ -227,9 +227,9 @@ async fn handle_next_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 
 async fn handle_previous_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
-        eprintln!("rosesong 没有处于运行状态");
+        println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        eprintln!("当前播放列表为空，请先添加歌曲");
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else {
         proxy.previous().await?;
         println!("播放上一首");
@@ -240,18 +240,18 @@ async fn handle_previous_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 async fn handle_stop_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if is_rosesong_running(proxy).await? {
         proxy.stop().await?;
-        println!("rosesong已退出");
+        println!("rosesong 已退出");
     } else {
-        eprintln!("rosesong 没有处于运行状态");
+        println!("{}", "rosesong 没有处于运行状态".red());
     }
     Ok(())
 }
 
 async fn handle_mode_command(mode_cmd: ModeCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
-        eprintln!("rosesong 没有处于运行状态");
+        println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        eprintln!("当前播放列表为空，请先添加歌曲");
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else if mode_cmd.loop_mode {
         proxy.set_mode("Loop").await?;
         println!("设置为循环播放");
@@ -262,7 +262,7 @@ async fn handle_mode_command(mode_cmd: ModeCommand, proxy: &MyPlayerProxy<'_>) -
         proxy.set_mode("Repeat").await?;
         println!("设置为单曲循环");
     } else {
-        eprintln!("没有这个播放模式");
+        println!("{}", "没有这个播放模式".red());
     }
     Ok(())
 }
@@ -300,7 +300,7 @@ async fn initialize_directories() -> StdResult<PathBuf> {
 
 async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if is_rosesong_running(proxy).await? {
-        println!("RoseSong 当前已经处于运行状态");
+        println!("{}", "RoseSong 当前已经处于运行状态".yellow());
         return Ok(());
     }
 
@@ -317,7 +317,14 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     }
 
     let child = Command::new(rosesong_path).spawn().map_err(App::Io)?;
-    println!("RoseSong 成功启动，进程 ID: {:?}", child.id());
+    println!(
+        "{}",
+        format!(
+            "RoseSong 成功启动，进程 ID: {}",
+            child.id().unwrap_or_default().to_string().green()
+        )
+        .blue()
+    );
     Ok(())
 }
 
@@ -388,7 +395,7 @@ async fn import_favorite_or_bvid_or_cid(
     file.write_all(toml_content.as_bytes())
         .await
         .map_err(App::Io)?;
-    println!("导入成功");
+    println!("{}", "导入成功".green());
     Ok(())
 }
 
@@ -425,7 +432,7 @@ async fn perform_deletion(
 ) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     if !playlist_path.exists() {
-        eprintln!("播放列表文件不存在");
+        println!("{}", "播放列表文件不存在".red());
         return Ok(());
     }
     if all {
@@ -439,9 +446,9 @@ async fn perform_deletion(
             .expect("Failed to read line");
         if confirmation.trim().eq_ignore_ascii_case("y") {
             fs::write(&playlist_path, "").await.map_err(App::Io)?;
-            println!("播放列表已清空");
+            println!("{}", "播放列表已清空".green());
         } else {
-            println!("取消清空操作");
+            println!("{}", "取消清空操作".yellow());
         }
         return Ok(());
     }
@@ -477,7 +484,7 @@ async fn perform_deletion(
         );
     }
     if tracks_to_delete.is_empty() {
-        println!("没有找到符合条件的track");
+        println!("{}", "没有找到符合条件的track".black());
         return Ok(());
     }
     print!(
@@ -501,9 +508,9 @@ async fn perform_deletion(
         file.write_all(toml_content.as_bytes())
             .await
             .map_err(App::Io)?;
-        println!("删除成功");
+        println!("{}", "删除成功".green());
     } else {
-        println!("取消删除操作");
+        println!("{}", "取消删除操作".yellow());
     }
     Ok(())
 }
@@ -516,7 +523,7 @@ async fn find_track(
 ) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     if !playlist_path.exists() {
-        eprintln!("播放列表文件不存在");
+        println!("{}", "播放列表文件不存在".red());
         return Ok(());
     }
     let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
@@ -536,12 +543,15 @@ async fn find_track(
         results.retain(|track| track.owner.contains(&owner));
     }
     if results.is_empty() {
-        println!("没有找到符合条件的track");
+        println!("{}", "没有找到符合条件的track".black());
     } else {
         for track in results {
             println!(
                 "bvid: {}, cid: {}, title: {}, owner: {}",
-                track.bvid, track.cid, track.title, track.owner
+                track.bvid.yellow(),
+                track.cid,
+                track.title.cyan(),
+                track.owner
             );
         }
     }
@@ -570,9 +580,9 @@ async fn display_playlist() -> StdResult<()> {
             println!(
                 "{:<2}. bvid: {}, cid: {}, title: {}, owner: {}",
                 start + i + 1,
-                track.bvid.to_string().yellow(),
+                track.bvid.yellow(),
                 track.cid,
-                track.title.to_string().cyan(),
+                track.title.cyan(),
                 track.owner
             );
         }
