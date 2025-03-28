@@ -1,6 +1,6 @@
 use std::{io::Write, sync::mpsc};
 
-use crate::error::App;
+use crate::{error::App, proxy_pool};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
@@ -123,7 +123,7 @@ pub async fn get_video_data(
 
     if let Some(fid) = fid {
         let bvids = fetch_bvids_from_fid(client, fid).await?;
-        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        batch_fetch_audio_info(&mut video_data_list, &bvids)?;
     } else if let Some(bvid) = bvid {
         let video_data = fetch_video_data(client, bvid).await?;
         if let Some(season_id) = video_data.season_id.as_ref() {
@@ -137,7 +137,7 @@ pub async fn get_video_data(
                 .expect("Failed to read line");
             if confirmation.trim().eq_ignore_ascii_case("y") {
                 let bvids = fetch_bvids_from_session_id(client, &season_id.to_string()).await?;
-                batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+                batch_fetch_audio_info(&mut video_data_list, &bvids)?;
             } else {
                 video_data_list.push(video_data);
             }
@@ -146,7 +146,7 @@ pub async fn get_video_data(
         }
     } else if let Some(season_id) = sid {
         let bvids = fetch_bvids_from_session_id(client, season_id).await?;
-        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        batch_fetch_audio_info(&mut video_data_list, &bvids)?;
     } else {
         return Err(App::InvalidInput("请提供正确的 fid 或 bvid".to_string()));
     }
@@ -161,7 +161,6 @@ pub async fn get_video_data(
 }
 
 fn batch_fetch_audio_info(
-    client: &Client,
     video_data_list: &mut Vec<VideoData>,
     bvids: &[String],
 ) -> Result<(), App> {
@@ -175,11 +174,12 @@ fn batch_fetch_audio_info(
     for batch in batch_bvids {
         let pb = m.add(create_progress_bar(batch.clone().len() as u64));
         let task_data = batch.clone();
-        let client_ = client.clone();
         let send_ = send.clone();
         tokio::spawn(async move {
+            let proxy = proxy_pool::get_proxy().await.unwrap();
+            let client = reqwest::ClientBuilder::new().proxy(proxy).build().unwrap();
             for task_bvid in task_data {
-                let video_data = fetch_video_data(&client_, &task_bvid).await.unwrap();
+                let video_data = fetch_video_data(&client, &task_bvid).await.unwrap();
                 send_.send(video_data).unwrap();
                 pb.inc(1);
             }

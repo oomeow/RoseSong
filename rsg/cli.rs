@@ -1,5 +1,6 @@
 mod bilibili;
 mod error;
+mod proxy_pool;
 
 use bilibili::fetch_audio_info::get_video_data;
 use clap::{Parser, Subcommand};

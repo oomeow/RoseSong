@@ -21,4 +21,6 @@ pub enum App {
     OneshotRecv(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Zbus error")]
     Zbus(#[from] ZbusError),
+    #[error("No proxy found")]
+    NoProxy,
 }
