@@ -99,8 +99,8 @@ struct AddCommand {
     fid: Option<String>,
     #[arg(short = 'b', long = "bvid", help = "要导入的 bvid")]
     bvid: Option<String>,
-    #[arg(short = 'c', long = "cid", help = "要导入的合集 ID")]
-    cid: Option<String>,
+    #[arg(short = 's', long = "sid", help = "要导入的合集 ID")]
+    sid: Option<String>,
 }
 
 #[derive(Parser)]
@@ -157,7 +157,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         Commands::Previous => handle_previous_command(&proxy).await,
         Commands::Stop => handle_stop_command(&proxy).await,
         Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
-        Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.cid, &proxy).await,
+        Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await,
         Commands::Delete(delete_cmd) => {
             delete_tracks(
                 delete_cmd.bvid,
@@ -338,13 +338,13 @@ async fn add_tracks(
 async fn import_favorite_or_bvid_or_cid(
     fid: Option<String>,
     bvid: Option<String>,
-    cid: Option<String>,
+    sid: Option<String>,
 ) -> StdResult<()> {
     let client = reqwest::Client::new();
     let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
     println!("正在获取相关信息");
     let video_data_list =
-        get_video_data(&client, fid.as_deref(), bvid.as_deref(), cid.as_deref()).await?;
+        get_video_data(&client, fid.as_deref(), bvid.as_deref(), sid.as_deref()).await?;
     let mut new_tracks = Vec::new();
     for video_data in video_data_list {
         new_tracks.push(Track {

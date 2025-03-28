@@ -1,5 +1,7 @@
+use std::sync::mpsc;
+
 use crate::error::App;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
@@ -27,8 +29,11 @@ pub fn create_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] ({pos}/{len}, ETA {eta})")
-            .unwrap(),
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.blue}] ({pos}/{len}, ETA {eta})",
+            )
+            .unwrap()
+            .progress_chars("█▓▒░  "),
     );
     pb
 }
@@ -78,9 +83,9 @@ pub async fn fetch_bvids_from_fid(client: &Client, fid: &str) -> Result<Vec<Stri
 
 pub async fn fetch_bvids_from_session_id(
     client: &Client,
-    session_id: &str,
+    season_id: &str,
 ) -> Result<Vec<String>, App> {
-    let url = format!("https://api.bilibili.com/x/space/fav/season/list?season_id={session_id}");
+    let url = format!("https://api.bilibili.com/x/space/fav/season/list?season_id={season_id}");
     let response = client.get(&url).send().await.map_err(|e| {
         eprintln!("Failed to send request to {url}: {e}");
         App::HttpRequest(e)
@@ -112,7 +117,7 @@ pub async fn get_video_data(
     client: &Client,
     fid: Option<&str>,
     bvid: Option<&str>,
-    cid: Option<&str>,
+    sid: Option<&str>,
 ) -> Result<Vec<VideoData>, App> {
     let mut video_data_list = Vec::new();
 
@@ -127,7 +132,7 @@ pub async fn get_video_data(
         pb.finish_and_clear();
     } else if let Some(bvid) = bvid {
         let video_data = fetch_video_data(client, bvid).await?;
-        if let Some(session_id) = video_data.season_id.as_ref() {
+        if let Some(season_id) = video_data.season_id.as_ref() {
             println!("该歌曲位于合集中，是否导入该合集? (y/n)");
             let mut confirmation = String::new();
             let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
@@ -136,29 +141,17 @@ pub async fn get_video_data(
                 .await
                 .expect("Failed to read line");
             if confirmation.trim().eq_ignore_ascii_case("y") {
-                let bvids = fetch_bvids_from_session_id(client, &session_id.to_string()).await?;
-                let pb = create_progress_bar(bvids.clone().len() as u64);
-                for bvid in bvids {
-                    let video_data = fetch_video_data(client, &bvid).await?;
-                    video_data_list.push(video_data);
-                    pb.inc(1);
-                }
-                pb.finish_and_clear();
+                let bvids = fetch_bvids_from_session_id(client, &season_id.to_string()).await?;
+                batch_fetch_audio_info(client, &mut video_data_list, bvids).await?;
             } else {
                 video_data_list.push(video_data);
             }
         } else {
             video_data_list.push(video_data);
         }
-    } else if let Some(cid) = cid {
-        let bvids = fetch_bvids_from_session_id(client, cid).await?;
-        let pb = create_progress_bar(bvids.clone().len() as u64);
-        for bvid in bvids {
-            let video_data = fetch_video_data(client, &bvid).await?;
-            video_data_list.push(video_data);
-            pb.inc(1);
-        }
-        pb.finish_and_clear();
+    } else if let Some(season_id) = sid {
+        let bvids = fetch_bvids_from_session_id(client, season_id).await?;
+        batch_fetch_audio_info(client, &mut video_data_list, bvids).await?;
     } else {
         return Err(App::InvalidInput("请提供正确的 fid 或 bvid".to_string()));
     }
@@ -170,4 +163,47 @@ pub async fn get_video_data(
     }
 
     Ok(video_data_list)
+}
+
+async fn batch_fetch_audio_info(
+    client: &Client,
+    video_data_list: &mut Vec<VideoData>,
+    bvids: Vec<String>,
+) -> Result<(), App> {
+    let (send, recv) = mpsc::channel();
+    let m = MultiProgress::new();
+    let batch_bvids = bvids
+        .chunks(100)
+        .map(|i| i.to_vec())
+        .collect::<Vec<Vec<String>>>();
+
+    for batch in batch_bvids {
+        let pb = m.add(create_progress_bar(batch.clone().len() as u64));
+        let task_data = batch.clone();
+        let client_ = client.clone();
+        // let video_data_list_ = video_data_list.clone();
+        let send_ = send.clone();
+        tokio::spawn(async move {
+            for task_bvid in task_data {
+                let video_data = fetch_video_data(&client_, &task_bvid).await.unwrap();
+                send_.send(video_data).unwrap();
+                pb.inc(1);
+            }
+            pb.finish_and_clear();
+        });
+    }
+
+    drop(send);
+
+    for video_data in recv {
+        video_data_list.push(video_data);
+    }
+
+    if video_data_list.is_empty() {
+        return Err(App::InvalidInput(
+            "提供的 bvid 无效或没有找到相关的视频".to_string(),
+        ));
+    }
+
+    Ok(())
 }
