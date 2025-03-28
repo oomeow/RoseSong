@@ -563,22 +563,12 @@ async fn display_playlist() -> StdResult<()> {
     let total_pages = total_tracks.div_ceil(page_size);
     let mut current_page = 1;
     loop {
+        println!();
         let start = (current_page - 1) * page_size;
         let end = (start + page_size).min(total_tracks);
-        println!(
-            "\n{}",
-            format!(
-                "第 {} 页，共 {} 页",
-                current_page.to_string().green(),
-                total_pages.to_string().green()
-            )
-            .blue()
-            .bold()
-            .on_black()
-        );
         for (i, track) in tracks[start..end].iter().enumerate() {
             println!(
-                "{}. bvid: {}, cid: {}, title: {}, owner: {}",
+                "{:<2}. bvid: {}, cid: {}, title: {}, owner: {}",
                 start + i + 1,
                 track.bvid.to_string().yellow(),
                 track.cid,
@@ -588,7 +578,12 @@ async fn display_playlist() -> StdResult<()> {
         }
         print!(
             "{}",
-            format!("\n请输入页码（1-{}），或输入 'q' 退出：", total_pages).blue()
+            format!(
+                "当前第 {} 页, 请输入页码 (1-{})，或输入 'q' 退出：",
+                current_page.to_string().green(),
+                total_pages
+            )
+            .blue()
         );
         std::io::stdout().flush().unwrap();
         let mut input = String::new();
@@ -602,7 +597,10 @@ async fn display_playlist() -> StdResult<()> {
         }
         match input.trim().parse::<usize>() {
             Ok(page) if page >= 1 && page <= total_pages => current_page = page,
-            _ => println!("无效的输入，请输入有效的页码或 'q' 退出"),
+            _ => println!(
+                "{}",
+                "无效的输入，请输入有效的页码或 'q' 退出".red().on_black()
+            ),
         }
     }
     Ok(())
