@@ -57,7 +57,7 @@ enum Commands {
     Next,
 
     #[command(about = "播放上一首歌曲")]
-    Previous,
+    Prev,
 
     #[command(about = "停止 RoseSong")]
     Stop,
@@ -75,7 +75,7 @@ enum Commands {
     Delete(DeleteCommand),
 
     #[command(about = "显示播放列表")]
-    Playlist,
+    List,
 
     #[command(about = "启动 RoseSong")]
     Start,
@@ -161,7 +161,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         Commands::Play(play_cmd) => handle_play_command(play_cmd, &proxy).await,
         Commands::Pause => handle_pause_command(&proxy).await,
         Commands::Next => handle_next_command(&proxy).await,
-        Commands::Previous => handle_previous_command(&proxy).await,
+        Commands::Prev => handle_previous_command(&proxy).await,
         Commands::Stop => handle_stop_command(&proxy).await,
         Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
         Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await,
@@ -178,7 +178,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         Commands::Find(find_cmd) => {
             find_track(find_cmd.bvid, find_cmd.cid, find_cmd.title, find_cmd.owner).await
         }
-        Commands::Playlist => display_playlist().await,
+        Commands::List => display_playlist().await,
         Commands::Start => start_rosesong(&proxy).await,
         Commands::Status => display_status(&proxy).await,
     }
@@ -573,7 +573,6 @@ async fn display_playlist() -> StdResult<()> {
     let total_pages = total_tracks.div_ceil(page_size);
     let mut current_page = 1;
     loop {
-        println!();
         let start = (current_page - 1) * page_size;
         let end = (start + page_size).min(total_tracks);
         for (i, track) in tracks[start..end].iter().enumerate() {
@@ -612,6 +611,7 @@ async fn display_playlist() -> StdResult<()> {
                 "无效的输入，请输入有效的页码或 'q' 退出".red().on_black()
             ),
         }
+        println!("\n")
     }
     Ok(())
 }
