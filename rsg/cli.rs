@@ -543,14 +543,18 @@ async fn find_track(
         results.retain(|track| track.owner.contains(&owner));
     }
     if results.is_empty() {
-        println!("{}", "没有找到符合条件的track".black());
+        println!("没有找到符合条件的track");
     } else {
         for track in results {
             println!(
-                "bvid: {}, cid: {}, title: {}, owner: {}",
+                "{}: {}, {} {}, {} {}, {} {}",
+                "bvid:".black(),
                 track.bvid.yellow(),
+                "cid:".black(),
                 track.cid,
+                "title:".black(),
                 track.title.cyan(),
+                "owner:".black(),
                 track.owner
             );
         }
@@ -577,11 +581,15 @@ async fn display_playlist() -> StdResult<()> {
         let end = (start + page_size).min(total_tracks);
         for (i, track) in tracks[start..end].iter().enumerate() {
             println!(
-                "{:<2}. bvid: {}, cid: {}, title: {}, owner: {}",
+                "{:<2}. {} {}, {} {}, {} {}, {} {}",
                 start + i + 1,
+                "bvid:".black(),
                 track.bvid.yellow(),
+                "cid:".black(),
                 track.cid,
+                "title:".black(),
                 track.title.cyan(),
+                "owner:".black(),
                 track.owner
             );
         }
