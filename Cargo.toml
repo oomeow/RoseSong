@@ -23,6 +23,7 @@ lto = "fat"
 
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
+colored = "3.0.0"
 flexi_logger = "0.29"
 futures-util = "0.3"
 glib = "0.20"

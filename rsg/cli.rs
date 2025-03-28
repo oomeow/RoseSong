@@ -2,12 +2,14 @@ mod bilibili;
 mod error;
 mod proxy_pool;
 
+extern crate colored;
+
 use bilibili::fetch_audio_info::get_video_data;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use error::App;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::Path;
 use std::{collections::HashSet, path::PathBuf};
 use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
 use zbus::{proxy, Connection};
@@ -77,6 +79,9 @@ enum Commands {
 
     #[command(about = "启动 RoseSong")]
     Start,
+
+    #[command(about = "显示当前播放的歌曲信息")]
+    Status,
 }
 
 #[derive(Parser)]
@@ -175,26 +180,23 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         }
         Commands::Playlist => display_playlist().await,
         Commands::Start => start_rosesong(&proxy).await,
+        Commands::Status => display_status(&proxy).await,
     }
 }
 
 async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
-    if let Some(bvid) = play_cmd.bvid {
-        if !is_rosesong_running(proxy).await? {
-            eprintln!("rosesong 没有处于运行状态");
-        } else if is_playlist_empty().await? {
-            eprintln!("当前播放列表为空，请先添加歌曲");
-        } else {
-            proxy.play_bvid(&bvid).await?;
-            println!("播放指定bvid");
-        }
-    } else if !is_rosesong_running(proxy).await? {
-        eprintln!("rosesong 没有处于运行状态");
+    if !is_rosesong_running(proxy).await? {
+        println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        eprintln!("当前播放列表为空，请先添加歌曲");
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else {
-        proxy.play().await?;
-        println!("继续播放");
+        if let Some(bvid) = play_cmd.bvid {
+            proxy.play_bvid(&bvid).await?;
+            println!("播放指定 bvid");
+        } else {
+            proxy.play().await?;
+            println!("继续播放");
+        }
     }
     Ok(())
 }
@@ -361,7 +363,7 @@ async fn import_favorite_or_bvid_or_cid(
 
     let mut current = 0;
     let mut tracks = Vec::new();
-    if Path::new(&playlist_path).exists() {
+    if playlist_path.exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
         let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
         current = playlist.current;
@@ -563,18 +565,32 @@ async fn display_playlist() -> StdResult<()> {
     loop {
         let start = (current_page - 1) * page_size;
         let end = (start + page_size).min(total_tracks);
-        println!("第 {current_page} 页，共 {total_pages} 页");
+        println!(
+            "\n{}",
+            format!(
+                "第 {} 页，共 {} 页",
+                current_page.to_string().green(),
+                total_pages.to_string().green()
+            )
+            .blue()
+            .bold()
+            .on_black()
+        );
         for (i, track) in tracks[start..end].iter().enumerate() {
             println!(
                 "{}. bvid: {}, cid: {}, title: {}, owner: {}",
                 start + i + 1,
-                track.bvid,
+                track.bvid.to_string().yellow(),
                 track.cid,
-                track.title,
+                track.title.to_string().cyan(),
                 track.owner
             );
         }
-        println!("\n请输入页码（1-{total_pages}），或输入 'q' 退出：");
+        print!(
+            "{}",
+            format!("\n请输入页码（1-{}），或输入 'q' 退出：", total_pages).blue()
+        );
+        std::io::stdout().flush().unwrap();
         let mut input = String::new();
         let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
         stdin
@@ -589,5 +605,38 @@ async fn display_playlist() -> StdResult<()> {
             _ => println!("无效的输入，请输入有效的页码或 'q' 退出"),
         }
     }
+    Ok(())
+}
+
+async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
+    println!("{}", "[rosesong 信息]".blue().bold().on_black());
+    let is_running = is_rosesong_running(proxy).await?;
+    let running_status = if is_running {
+        "正在运行".green()
+    } else {
+        "未运行".red()
+    };
+    println!("运行状态: {}", running_status);
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    let mut playlist = Playlist::default();
+    if playlist_path.exists() {
+        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
+        playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
+    }
+    let is_playlist_empty = is_playlist_empty().await?;
+    let playlist_status = if is_playlist_empty {
+        "空".red()
+    } else {
+        format!("共 {} 首歌曲", playlist.tracks.len().to_string().cyan()).normal()
+    };
+    println!("播放列表: {}\n", playlist_status);
+    let track_info = playlist.tracks.get(playlist.current).unwrap();
+    println!(
+        "{}\nBV号: {}\nup主: {}\n标题: {}",
+        "[当前歌曲信息]".blue().bold().on_black(),
+        track_info.bvid.to_string().yellow(),
+        track_info.owner.yellow(),
+        track_info.title.yellow()
+    );
     Ok(())
 }
