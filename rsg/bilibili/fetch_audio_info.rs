@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::{io::Write, sync::mpsc};
 
 use crate::error::App;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -123,17 +123,12 @@ pub async fn get_video_data(
 
     if let Some(fid) = fid {
         let bvids = fetch_bvids_from_fid(client, fid).await?;
-        let pb = create_progress_bar(bvids.clone().len() as u64);
-        for bvid in bvids {
-            let video_data = fetch_video_data(client, &bvid).await?;
-            video_data_list.push(video_data);
-            pb.inc(1);
-        }
-        pb.finish_and_clear();
+        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
     } else if let Some(bvid) = bvid {
         let video_data = fetch_video_data(client, bvid).await?;
         if let Some(season_id) = video_data.season_id.as_ref() {
-            println!("该歌曲位于合集中，是否导入该合集? (y/n)");
+            print!("该歌曲位于合集中，是否导入该合集? [y/n]: ");
+            std::io::stdout().flush().unwrap();
             let mut confirmation = String::new();
             let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
             stdin
@@ -142,7 +137,7 @@ pub async fn get_video_data(
                 .expect("Failed to read line");
             if confirmation.trim().eq_ignore_ascii_case("y") {
                 let bvids = fetch_bvids_from_session_id(client, &season_id.to_string()).await?;
-                batch_fetch_audio_info(client, &mut video_data_list, bvids).await?;
+                batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
             } else {
                 video_data_list.push(video_data);
             }
@@ -151,7 +146,7 @@ pub async fn get_video_data(
         }
     } else if let Some(season_id) = sid {
         let bvids = fetch_bvids_from_session_id(client, season_id).await?;
-        batch_fetch_audio_info(client, &mut video_data_list, bvids).await?;
+        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
     } else {
         return Err(App::InvalidInput("请提供正确的 fid 或 bvid".to_string()));
     }
@@ -165,23 +160,22 @@ pub async fn get_video_data(
     Ok(video_data_list)
 }
 
-async fn batch_fetch_audio_info(
+fn batch_fetch_audio_info(
     client: &Client,
     video_data_list: &mut Vec<VideoData>,
-    bvids: Vec<String>,
+    bvids: &[String],
 ) -> Result<(), App> {
     let (send, recv) = mpsc::channel();
     let m = MultiProgress::new();
     let batch_bvids = bvids
         .chunks(100)
-        .map(|i| i.to_vec())
+        .map(<[String]>::to_vec)
         .collect::<Vec<Vec<String>>>();
 
     for batch in batch_bvids {
         let pb = m.add(create_progress_bar(batch.clone().len() as u64));
         let task_data = batch.clone();
         let client_ = client.clone();
-        // let video_data_list_ = video_data_list.clone();
         let send_ = send.clone();
         tokio::spawn(async move {
             for task_bvid in task_data {

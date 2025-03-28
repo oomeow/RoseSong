@@ -5,8 +5,9 @@ use bilibili::fetch_audio_info::get_video_data;
 use clap::{Parser, Subcommand};
 use error::App;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::io::Write;
 use std::path::Path;
+use std::{collections::HashSet, path::PathBuf};
 use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
 use zbus::{proxy, Connection};
 
@@ -271,25 +272,27 @@ async fn is_rosesong_running(proxy: &MyPlayerProxy<'_>) -> StdResult<bool> {
 }
 
 async fn is_playlist_empty() -> StdResult<bool> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
-    if !Path::new(&playlist_path).exists() {
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    if !playlist_path.exists() {
         return Ok(true);
     }
     let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
     Ok(content.trim().is_empty())
 }
 
-async fn initialize_directories() -> StdResult<String> {
+async fn initialize_directories() -> StdResult<PathBuf> {
     let home_dir = std::env::var("HOME")?;
-    let required_dirs = [format!("{home_dir}/.config/rosesong/playlists")];
-    for dir in &required_dirs {
+    let playlists_dir = PathBuf::from(format!("{home_dir}/.config/rosesong/playlists"));
+    let required_dirs = [&playlists_dir];
+    for dir in required_dirs {
         fs::create_dir_all(dir).await?;
     }
-    let playlist_path = format!("{home_dir}/.config/rosesong/playlists/playlist.toml");
-    if !Path::new(&playlist_path).exists() {
+    // let playlist_path = format!("{home_dir}/.config/rosesong/playlists/playlist.toml");
+    let playlist_path = playlists_dir.join("playlist.toml");
+    if !playlist_path.exists() {
         fs::write(&playlist_path, "").await?;
     }
-    Ok(format!("{home_dir}/.config/rosesong/playlists"))
+    Ok(playlists_dir)
 }
 
 async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
@@ -321,7 +324,7 @@ async fn add_tracks(
     cid: Option<String>,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     import_favorite_or_bvid_or_cid(fid, bvid, cid).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
@@ -341,7 +344,7 @@ async fn import_favorite_or_bvid_or_cid(
     sid: Option<String>,
 ) -> StdResult<()> {
     let client = reqwest::Client::new();
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
     println!("正在获取相关信息");
     let video_data_list =
         get_video_data(&client, fid.as_deref(), bvid.as_deref(), sid.as_deref()).await?;
@@ -393,7 +396,7 @@ async fn delete_tracks(
     all: bool,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     perform_deletion(bvid, cid, owner, all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
@@ -417,13 +420,14 @@ async fn perform_deletion(
     owner: Option<String>,
     all: bool,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
-    if !Path::new(&playlist_path).exists() {
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    if !playlist_path.exists() {
         eprintln!("播放列表文件不存在");
         return Ok(());
     }
     if all {
-        println!("即将清空播放列表，是否确认删除所有歌曲？(y/n)");
+        print!("即将清空播放列表，是否确认删除所有歌曲？[y/n]: ");
+        std::io::stdout().flush().unwrap();
         let mut confirmation = String::new();
         let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
         stdin
@@ -473,10 +477,11 @@ async fn perform_deletion(
         println!("没有找到符合条件的track");
         return Ok(());
     }
-    println!(
-        "即将删除 {} 首歌曲，是否确认删除？(y/n)",
+    print!(
+        "即将删除 {} 首歌曲，是否确认删除？[y/n]: ",
         tracks_to_delete.len()
     );
+    std::io::stdout().flush().unwrap();
     let mut confirmation = String::new();
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
     stdin
@@ -506,8 +511,8 @@ async fn find_track(
     title: Option<String>,
     owner: Option<String>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
-    if !Path::new(&playlist_path).exists() {
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    if !playlist_path.exists() {
         eprintln!("播放列表文件不存在");
         return Ok(());
     }
@@ -541,8 +546,8 @@ async fn find_track(
 }
 
 async fn display_playlist() -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.clone() + "/playlist.toml";
-    if !Path::new(&playlist_path).exists() {
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    if !playlist_path.exists() {
         eprintln!("播放列表文件不存在");
         return Ok(());
     }
