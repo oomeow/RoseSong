@@ -1,6 +1,5 @@
 mod bilibili;
 mod error;
-mod proxy_pool;
 
 extern crate colored;
 
@@ -189,14 +188,12 @@ async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
         println!("{}", "当前播放列表为空，请先添加歌曲".red());
+    } else if let Some(bvid) = play_cmd.bvid {
+        proxy.play_bvid(&bvid).await?;
+        println!("播放指定 bvid");
     } else {
-        if let Some(bvid) = play_cmd.bvid {
-            proxy.play_bvid(&bvid).await?;
-            println!("播放指定 bvid");
-        } else {
-            proxy.play().await?;
-            println!("继续播放");
-        }
+        proxy.play().await?;
+        println!("继续播放");
     }
     Ok(())
 }
@@ -619,7 +616,7 @@ async fn display_playlist() -> StdResult<()> {
                 "无效的输入，请输入有效的页码或 'q' 退出".red().on_black()
             ),
         }
-        println!("\n")
+        println!("\n");
     }
     Ok(())
 }
@@ -632,7 +629,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     } else {
         "未运行".red()
     };
-    println!("运行状态: {}", running_status);
+    println!("运行状态: {running_status}");
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     let mut playlist = Playlist::default();
     if playlist_path.exists() {
@@ -645,7 +642,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     } else {
         format!("共 {} 首歌曲", playlist.tracks.len().to_string().cyan()).normal()
     };
-    println!("播放列表: {}\n", playlist_status);
+    println!("播放列表: {playlist_status}\n");
     let track_info = playlist.tracks.get(playlist.current).unwrap();
     println!(
         "{}\nBV号: {}\nup主: {}\n标题: {}",
