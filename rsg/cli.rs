@@ -353,8 +353,10 @@ async fn import_favorite_or_bvid_or_cid(
     let client = reqwest::Client::new();
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     println!("正在获取相关信息");
-    let video_data_list =
-        get_video_data(&client, fid.as_deref(), bvid.as_deref(), sid.as_deref()).await?;
+    let video_data_list = get_video_data(&client, fid, bvid, sid).await?;
+    if video_data_list.is_empty() {
+        return Ok(());
+    }
     let mut new_tracks = Vec::new();
     for video_data in video_data_list {
         new_tracks.push(Track {

@@ -1,10 +1,10 @@
 use std::{io::Write, sync::mpsc};
 
-use crate::error::App;
+use crate::{error::App, initialize_directories, Playlist};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::io::AsyncBufReadExt;
+use tokio::{fs, io::AsyncBufReadExt};
 
 #[derive(Deserialize)]
 pub struct Owner {
@@ -115,17 +115,35 @@ pub async fn fetch_bvids_from_session_id(
 
 pub async fn get_video_data(
     client: &Client,
-    fid: Option<&str>,
-    bvid: Option<&str>,
-    sid: Option<&str>,
+    fid: Option<String>,
+    bvid: Option<String>,
+    sid: Option<String>,
 ) -> Result<Vec<VideoData>, App> {
     let mut video_data_list = Vec::new();
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    let content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
+    let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
+    let exists_bvids: Vec<String> = playlist.tracks.into_iter().map(|i| i.bvid).collect();
 
     if let Some(fid) = fid {
-        let bvids = fetch_bvids_from_fid(client, fid).await?;
-        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        let bvids = fetch_bvids_from_fid(client, &fid).await?;
+        if bvids.is_empty() {
+            return Err(App::InvalidInput(
+                "提供的 fid 无效或没有找到相关的视频".to_string(),
+            ));
+        }
+        let bvids = bvids
+            .into_iter()
+            .filter(|i| !exists_bvids.contains(i))
+            .collect::<Vec<String>>();
+        if bvids.is_empty() {
+            println!("该收藏夹已存在于播放列表中");
+        } else {
+            batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        }
     } else if let Some(bvid) = bvid {
-        let video_data = fetch_video_data(client, bvid).await?;
+        let video_data = fetch_video_data(client, &bvid).await?;
+
         if let Some(season_id) = video_data.season_id.as_ref() {
             print!("该歌曲位于合集中，是否导入该合集? [y/n]: ");
             std::io::stdout().flush().unwrap();
@@ -137,7 +155,20 @@ pub async fn get_video_data(
                 .expect("Failed to read line");
             if confirmation.trim().eq_ignore_ascii_case("y") {
                 let bvids = fetch_bvids_from_session_id(client, &season_id.to_string()).await?;
-                batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+                if bvids.is_empty() {
+                    return Err(App::InvalidInput(
+                        "提供的 bvid 无效或没有找到相关的视频".to_string(),
+                    ));
+                }
+                let bvids = bvids
+                    .into_iter()
+                    .filter(|i| !exists_bvids.contains(i))
+                    .collect::<Vec<String>>();
+                if bvids.is_empty() {
+                    println!("该合集已存在于播放列表中");
+                } else {
+                    batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+                }
             } else {
                 video_data_list.push(video_data);
             }
@@ -145,15 +176,24 @@ pub async fn get_video_data(
             video_data_list.push(video_data);
         }
     } else if let Some(season_id) = sid {
-        let bvids = fetch_bvids_from_session_id(client, season_id).await?;
-        batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        let bvids = fetch_bvids_from_session_id(client, &season_id).await?;
+        if bvids.is_empty() {
+            return Err(App::InvalidInput(
+                "提供的 sid 无效或没有找到相关的视频".to_string(),
+            ));
+        }
+        let bvids = bvids
+            .into_iter()
+            .filter(|i| !exists_bvids.contains(i))
+            .collect::<Vec<String>>();
+        if bvids.is_empty() {
+            println!("该合集已存在于播放列表中");
+        } else {
+            batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
+        }
     } else {
-        return Err(App::InvalidInput("请提供正确的 fid 或 bvid".to_string()));
-    }
-
-    if video_data_list.is_empty() {
         return Err(App::InvalidInput(
-            "提供的 fid 或 bvid 无效或没有找到相关的视频".to_string(),
+            "请提供正确的 fid 或 bvid 或 sid".to_string(),
         ));
     }
 
