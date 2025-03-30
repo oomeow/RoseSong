@@ -4,7 +4,8 @@ mod error;
 extern crate colored;
 
 use bilibili::fetch_audio_info::get_tracks;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use error::App;
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,19 @@ enum Commands {
 
     #[command(about = "显示当前播放的歌曲信息")]
     Status,
+
+    #[command(about = "生成对应的 shell 命令补全")]
+    GenerateCompletion(ShellCommand),
+}
+
+#[derive(Parser)]
+struct ShellCommand {
+    #[arg(
+        short = 's',
+        long = "shell",
+        long_help = "要生成的 shell 命令补全类型文件, 需要重新初始化补全系统\r\n例如(zsh)：rsg generate-completion --shell zsh > /usr/local/share/zsh/site-functions/_rsg && compinit\r\n"
+    )]
+    shell: Shell,
 }
 
 #[derive(Parser)]
@@ -204,6 +218,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         Commands::List => display_playlist().await,
         Commands::Start => start_rosesong(&proxy).await,
         Commands::Status => display_status(&proxy).await,
+        Commands::GenerateCompletion(shell_cmd) => generate_completion(shell_cmd.shell),
     }
 }
 
@@ -673,5 +688,12 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
         println!("标题：{}", track.title.yellow());
         println!("up主：{}", track.owner.yellow());
     }
+    Ok(())
+}
+
+fn generate_completion(shell: Shell) -> Result<(), App> {
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
     Ok(())
 }
