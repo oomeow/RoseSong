@@ -43,9 +43,13 @@ trait MyPlayer {
 struct Cli {
     #[arg(
         long = "generate",
-        long_help = "要生成的 shell 命令补全类型文件, 需要重新初始化补全系统\r\n例如(zsh)：rsg --generate=zsh > /usr/local/share/zsh/site-functions/_rsg && compinit\r\n",
         value_name = "shell",
-        value_enum
+        value_enum,
+        hide_possible_values = true,
+        next_line_help = true,
+        long_help = "要生成的 shell 命令补全类型文件, 需要重新初始化补全系统
+例如(zsh)：rsg --generate=zsh > /usr/local/share/zsh/site-functions/_rsg && compinit
+允许的 shell 类型：zsh, fish, bash, powershell, elvish"
     )]
     generator: Option<Shell>,
     #[command(subcommand)]
