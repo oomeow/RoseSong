@@ -41,8 +41,15 @@ trait MyPlayer {
     version = "1.0.0"
 )]
 struct Cli {
+    #[arg(
+        long = "generate",
+        long_help = "要生成的 shell 命令补全类型文件, 需要重新初始化补全系统\r\n例如(zsh)：rsg --generate=zsh > /usr/local/share/zsh/site-functions/_rsg && compinit\r\n",
+        value_name = "shell",
+        value_enum
+    )]
+    generator: Option<Shell>,
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -82,19 +89,6 @@ enum Commands {
 
     #[command(about = "显示当前播放的歌曲信息")]
     Status,
-
-    #[command(about = "生成对应的 shell 命令补全")]
-    GenerateCompletion(ShellCommand),
-}
-
-#[derive(Parser)]
-struct ShellCommand {
-    #[arg(
-        short = 's',
-        long = "shell",
-        long_help = "要生成的 shell 命令补全类型文件, 需要重新初始化补全系统\r\n例如(zsh)：rsg generate-completion --shell zsh > /usr/local/share/zsh/site-functions/_rsg && compinit\r\n"
-    )]
-    shell: Shell,
 }
 
 #[derive(Parser)]
@@ -194,32 +188,42 @@ async fn main() -> StdResult<()> {
 }
 
 async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
-    match cli.command {
-        Commands::Play(play_cmd) => handle_play_command(play_cmd, &proxy).await,
-        Commands::Pause => handle_pause_command(&proxy).await,
-        Commands::Next => handle_next_command(&proxy).await,
-        Commands::Prev => handle_previous_command(&proxy).await,
-        Commands::Stop => handle_stop_command(&proxy).await,
-        Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
-        Commands::Add(add_cmd) => add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await,
-        Commands::Delete(delete_cmd) => {
-            delete_tracks(
-                delete_cmd.bvid,
-                delete_cmd.cid,
-                delete_cmd.owner,
-                delete_cmd.all,
-                &proxy,
-            )
-            .await
-        }
-        Commands::Find(find_cmd) => {
-            find_track(find_cmd.bvid, find_cmd.cid, find_cmd.title, find_cmd.owner).await
-        }
-        Commands::List => display_playlist().await,
-        Commands::Start => start_rosesong(&proxy).await,
-        Commands::Status => display_status(&proxy).await,
-        Commands::GenerateCompletion(shell_cmd) => generate_completion(shell_cmd.shell),
+    if let Some(shell) = cli.generator {
+        generate_completion(shell)?;
+        return Ok(());
     }
+    if let Some(cmd) = cli.command {
+        return match cmd {
+            Commands::Play(play_cmd) => handle_play_command(play_cmd, &proxy).await,
+            Commands::Pause => handle_pause_command(&proxy).await,
+            Commands::Next => handle_next_command(&proxy).await,
+            Commands::Prev => handle_previous_command(&proxy).await,
+            Commands::Stop => handle_stop_command(&proxy).await,
+            Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
+            Commands::Add(add_cmd) => {
+                add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
+            }
+            Commands::Delete(delete_cmd) => {
+                delete_tracks(
+                    delete_cmd.bvid,
+                    delete_cmd.cid,
+                    delete_cmd.owner,
+                    delete_cmd.all,
+                    &proxy,
+                )
+                .await
+            }
+            Commands::Find(find_cmd) => {
+                find_track(find_cmd.bvid, find_cmd.cid, find_cmd.title, find_cmd.owner).await
+            }
+            Commands::List => display_playlist().await,
+            Commands::Start => start_rosesong(&proxy).await,
+            Commands::Status => display_status(&proxy).await,
+        };
+    } else {
+        display_status(&proxy).await?;
+    }
+    Ok(())
 }
 
 async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
