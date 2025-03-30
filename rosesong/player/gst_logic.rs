@@ -14,6 +14,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task;
 
+use super::playlist::{get_current_track_index, CURRENT_PLAY_INFO};
+
 pub enum Command {
     Play,
     PlayBvid(String),
@@ -180,6 +182,10 @@ impl Audio {
                         Command::SetPlayMode(new_mode) => {
                             let mut write_guard = play_mode.write().await;
                             *write_guard = new_mode;
+                            let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+                            if let Err(e) = current_play_info.set_play_mode(new_mode).await {
+                                error!("Failed to set play mode: {}", e);
+                            }
                         }
                         Command::ReloadPlaylist => {
                             if let Err(e) = handle_reload_playlist().await {
@@ -248,14 +254,10 @@ async fn handle_previous_track(
 async fn handle_reload_playlist() -> Result<(), App> {
     let playlist = PLAYLIST.read().await;
     let playlist = playlist.as_ref().unwrap();
-    let current_index = playlist.current;
+    let current_index = get_current_track_index().await;
     let current_track = get_current_track().await;
 
-    load(&format!(
-        "{}/.config/rosesong/playlists/playlist.toml",
-        std::env::var("HOME").expect("Failed to get HOME environment variable")
-    ))
-    .await?;
+    load().await?;
 
     let should_play = {
         if let Ok(current_track) = current_track {
@@ -292,12 +294,7 @@ async fn handle_reload_playlist() -> Result<(), App> {
 }
 
 async fn handle_playlist_is_empty(pipeline: &Pipeline, client: &Client) -> Result<(), App> {
-    load(&format!(
-        "{}/.config/rosesong/playlists/playlist.toml",
-        std::env::var("HOME").expect("Failed to get HOME environment variable")
-    ))
-    .await?;
-
+    load().await?;
     info!("Set track");
     set_current_track_index(0).await.ok();
     play_track(pipeline, client).await

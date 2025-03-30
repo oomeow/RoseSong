@@ -9,7 +9,7 @@ use crate::player::playlist::PlayMode;
 use crate::player::Audio;
 use flexi_logger::{Cleanup, Criterion, Duplicate, FileSpec, Logger, Naming};
 use log::{error, warn};
-use player::playlist::load;
+use player::playlist::{load, CURRENT_PLAY_INFO};
 use std::path::Path;
 use std::process;
 use std::sync::Arc;
@@ -78,9 +78,10 @@ async fn main() -> Result<(), App> {
         }
     }
 
-    load(&playlist_path).await?;
+    load().await?;
     let (stop_sender, stop_receiver) = watch::channel(());
-    let _audio_player = start_player_and_dbus_listener(&stop_sender)?;
+    let play_mode = CURRENT_PLAY_INFO.read().await.play_mode;
+    let _audio_player = start_player_and_dbus_listener(play_mode, &stop_sender)?;
     wait_for_stop_signal(stop_receiver).await;
     process::exit(0);
 }
@@ -110,8 +111,10 @@ async fn start_temp_dbus_listener(
     Ok(())
 }
 
-fn start_player_and_dbus_listener(stop_signal: &watch::Sender<()>) -> Result<Audio, App> {
-    let play_mode = PlayMode::Loop;
+fn start_player_and_dbus_listener(
+    play_mode: PlayMode,
+    stop_signal: &watch::Sender<()>,
+) -> Result<Audio, App> {
     let (command_sender, command_receiver) = mpsc::channel(1);
 
     let audio_player = Audio::new(play_mode, Arc::new(Mutex::new(command_receiver)))?;

@@ -8,8 +8,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use error::App;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::path::PathBuf;
+use std::{fmt::Display, io::Write};
 use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
 use zbus::{proxy, Connection};
 
@@ -143,8 +143,32 @@ struct Track {
 
 #[derive(Default, Serialize, Deserialize)]
 struct Playlist {
-    current: usize,
     tracks: Vec<Track>,
+}
+
+#[derive(Deserialize)]
+struct CurrentPlayInfo {
+    index: usize,
+    play_mode: PlayMode,
+    track: Option<Track>,
+}
+
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayMode {
+    Loop,
+    Shuffle,
+    Repeat,
+}
+
+impl Display for PlayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlayMode::Loop => write!(f, "顺序循环"),
+            PlayMode::Shuffle => write!(f, "随机"),
+            PlayMode::Repeat => write!(f, "单曲循环"),
+        }
+    }
 }
 
 #[tokio::main]
@@ -355,12 +379,10 @@ async fn import_favorite_or_bvid_or_cid(
     println!("正在获取相关信息");
     let new_tracks = get_tracks(&client, fid, bvid, sid).await?;
 
-    let mut current = 0;
     let mut tracks = Vec::new();
     if playlist_path.exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
         let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
-        current = playlist.current;
         tracks.extend(playlist.tracks);
     }
 
@@ -368,7 +390,7 @@ async fn import_favorite_or_bvid_or_cid(
     tracks.retain(|t| !new_tracks_bvid.contains(&t.bvid));
     tracks.extend(new_tracks);
 
-    let playlist = Playlist { current, tracks };
+    let playlist = Playlist { tracks };
     let toml_content = toml::to_string(&playlist)
         .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
     let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;
@@ -605,6 +627,16 @@ async fn display_playlist() -> StdResult<()> {
 }
 
 async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
+    let current_file_path = format!(
+        "{}/.config/rosesong/current.toml",
+        std::env::var("HOME").expect("Failed to get HOME environment variable")
+    );
+    let content = fs::read_to_string(&current_file_path)
+        .await
+        .map_err(App::Io)?;
+    let current_play_info = toml::from_str::<CurrentPlayInfo>(&content)
+        .map_err(|_| App::DataParsing("Failed to parse current.toml".to_string()))?;
+
     println!("{}", "[rosesong 信息]".blue().bold().on_black());
     let is_running = is_rosesong_running(proxy).await?;
     let running_status = if is_running {
@@ -613,6 +645,12 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
         "未运行".red()
     };
     println!("运行状态: {running_status}");
+
+    println!(
+        "播放模式：{}",
+        current_play_info.play_mode.to_string().cyan()
+    );
+
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     let mut playlist = Playlist::default();
     if playlist_path.exists() {
@@ -626,13 +664,14 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
         format!("共 {} 首歌曲", playlist.tracks.len().to_string().cyan()).normal()
     };
     println!("播放列表: {playlist_status}\n");
-    let track_info = playlist.tracks.get(playlist.current).unwrap();
-    println!(
-        "{}\nBV号: {}\nup主: {}\n标题: {}",
-        "[当前歌曲信息]".blue().bold().on_black(),
-        track_info.bvid.to_string().yellow(),
-        track_info.owner.yellow(),
-        track_info.title.yellow()
-    );
+
+    let track_info = current_play_info.track;
+    if let Some(track) = track_info {
+        println!("{}", "[当前歌曲信息]".blue().bold().on_black());
+        println!("索引：{}", current_play_info.index.to_string().yellow());
+        println!("BV号：{}", track.bvid.to_string().yellow());
+        println!("标题：{}", track.title.yellow());
+        println!("up主：{}", track.owner.yellow());
+    }
     Ok(())
 }
