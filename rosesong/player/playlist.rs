@@ -154,7 +154,7 @@ impl Playlist {
 }
 
 pub async fn get_current_track_index() -> usize {
-    CURRENT_PLAY_INFO.read().await.index
+    CURRENT_PLAY_INFO.read().await.index - 1
 }
 
 pub async fn set_current_track_index(index: usize) -> Result<(), App> {
