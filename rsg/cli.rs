@@ -3,13 +3,13 @@ mod error;
 
 extern crate colored;
 
-use bilibili::fetch_audio_info::get_video_data;
+use bilibili::fetch_audio_info::get_tracks;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use error::App;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::{collections::HashSet, path::PathBuf};
+use std::path::PathBuf;
 use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
 use zbus::{proxy, Connection};
 
@@ -353,19 +353,7 @@ async fn import_favorite_or_bvid_or_cid(
     let client = reqwest::Client::new();
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     println!("正在获取相关信息");
-    let video_data_list = get_video_data(&client, fid, bvid, sid).await?;
-    if video_data_list.is_empty() {
-        return Ok(());
-    }
-    let mut new_tracks = Vec::new();
-    for video_data in video_data_list {
-        new_tracks.push(Track {
-            bvid: video_data.bvid.clone(),
-            cid: video_data.cid.to_string().clone(),
-            title: video_data.title.clone(),
-            owner: video_data.owner.name.clone(),
-        });
-    }
+    let new_tracks = get_tracks(&client, fid, bvid, sid).await?;
 
     let mut current = 0;
     let mut tracks = Vec::new();
@@ -376,17 +364,10 @@ async fn import_favorite_or_bvid_or_cid(
         tracks.extend(playlist.tracks);
     }
 
-    let existing_bvids: HashSet<_> = tracks.iter().map(|track| track.bvid.clone()).collect();
-    for track in &mut tracks {
-        if let Some(new_track) = new_tracks.iter().find(|t| t.bvid == track.bvid) {
-            *track = new_track.clone();
-        }
-    }
-    for new_track in new_tracks {
-        if !existing_bvids.contains(&new_track.bvid) {
-            tracks.push(new_track);
-        }
-    }
+    let new_tracks_bvid: Vec<String> = new_tracks.iter().map(|t| t.bvid.clone()).collect();
+    tracks.retain(|t| !new_tracks_bvid.contains(&t.bvid));
+    tracks.extend(new_tracks);
+
     let playlist = Playlist { current, tracks };
     let toml_content = toml::to_string(&playlist)
         .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;

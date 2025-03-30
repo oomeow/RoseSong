@@ -1,10 +1,10 @@
 use std::{io::Write, sync::mpsc};
 
-use crate::{error::App, initialize_directories, Playlist};
+use crate::{error::App, Track};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::{fs, io::AsyncBufReadExt};
+use tokio::io::AsyncBufReadExt;
 
 #[derive(Deserialize)]
 pub struct Owner {
@@ -18,6 +18,52 @@ pub struct VideoData {
     pub cid: i64,
     pub owner: Owner,
     pub season_id: Option<i64>,
+    pub ugc_season: Option<UgcSeason>,
+}
+
+#[derive(Deserialize)]
+pub struct UgcSeason {
+    pub sections: Vec<Section>,
+}
+
+#[derive(Deserialize)]
+pub struct Section {
+    pub episodes: Vec<Episode>,
+}
+
+#[derive(Deserialize)]
+pub struct Episode {
+    pub cid: i64,
+    pub bvid: String,
+    pub title: String,
+}
+
+impl VideoData {
+    pub fn to_tracks_by_season(&self) -> Vec<Track> {
+        let mut tracks = Vec::new();
+        if let Some(ugc_season) = &self.ugc_season {
+            for section in &ugc_season.sections {
+                for episode in &section.episodes {
+                    tracks.push(Track {
+                        bvid: episode.bvid.clone(),
+                        cid: episode.cid.to_string(),
+                        title: episode.title.clone(),
+                        owner: self.owner.name.clone(),
+                    });
+                }
+            }
+        }
+        tracks
+    }
+
+    pub fn to_track(&self) -> Track {
+        Track {
+            bvid: self.bvid.clone(),
+            cid: self.cid.to_string(),
+            title: self.title.clone(),
+            owner: self.owner.name.clone(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -38,6 +84,7 @@ pub fn create_progress_bar(total: u64) -> ProgressBar {
     pb
 }
 
+// 可通过该方法获取合集里的所有视频信息 (ugc_season -> sections -> episodes(合集里的所有视频数组对象))
 pub async fn fetch_video_data(client: &Client, bvid: &str) -> Result<VideoData, App> {
     let url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
     let response = client.get(&url).send().await.map_err(|e| {
@@ -113,38 +160,20 @@ pub async fn fetch_bvids_from_session_id(
     Ok(bvids)
 }
 
-pub async fn get_video_data(
+pub async fn get_tracks(
     client: &Client,
     fid: Option<String>,
     bvid: Option<String>,
     sid: Option<String>,
-) -> Result<Vec<VideoData>, App> {
-    let mut video_data_list = Vec::new();
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    let content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
-    let exists_bvids: Vec<String> = playlist.tracks.into_iter().map(|i| i.bvid).collect();
+) -> Result<Vec<Track>, App> {
+    let mut track_list = Vec::new();
 
     if let Some(fid) = fid {
         let bvids = fetch_bvids_from_fid(client, &fid).await?;
-        if bvids.is_empty() {
-            return Err(App::InvalidInput(
-                "提供的 fid 无效或没有找到相关的视频".to_string(),
-            ));
-        }
-        let bvids = bvids
-            .into_iter()
-            .filter(|i| !exists_bvids.contains(i))
-            .collect::<Vec<String>>();
-        if bvids.is_empty() {
-            println!("该收藏夹已存在于播放列表中");
-        } else {
-            batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
-        }
+        batch_fetch_audio_info(client, &mut track_list, &bvids)?;
     } else if let Some(bvid) = bvid {
         let video_data = fetch_video_data(client, &bvid).await?;
-
-        if let Some(season_id) = video_data.season_id.as_ref() {
+        if video_data.season_id.is_some() {
             print!("该歌曲位于合集中，是否导入该合集? [y/n]: ");
             std::io::stdout().flush().unwrap();
             let mut confirmation = String::new();
@@ -154,55 +183,35 @@ pub async fn get_video_data(
                 .await
                 .expect("Failed to read line");
             if confirmation.trim().eq_ignore_ascii_case("y") {
-                let bvids = fetch_bvids_from_session_id(client, &season_id.to_string()).await?;
-                if bvids.is_empty() {
-                    return Err(App::InvalidInput(
-                        "提供的 bvid 无效或没有找到相关的视频".to_string(),
-                    ));
-                }
-                let bvids = bvids
-                    .into_iter()
-                    .filter(|i| !exists_bvids.contains(i))
-                    .collect::<Vec<String>>();
-                if bvids.is_empty() {
-                    println!("该合集已存在于播放列表中");
-                } else {
-                    batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
-                }
+                track_list.extend(video_data.to_tracks_by_season());
             } else {
-                video_data_list.push(video_data);
+                track_list.push(video_data.to_track());
             }
         } else {
-            video_data_list.push(video_data);
+            track_list.push(video_data.to_track());
         }
     } else if let Some(season_id) = sid {
         let bvids = fetch_bvids_from_session_id(client, &season_id).await?;
-        if bvids.is_empty() {
-            return Err(App::InvalidInput(
-                "提供的 sid 无效或没有找到相关的视频".to_string(),
-            ));
-        }
-        let bvids = bvids
-            .into_iter()
-            .filter(|i| !exists_bvids.contains(i))
-            .collect::<Vec<String>>();
-        if bvids.is_empty() {
-            println!("该合集已存在于播放列表中");
-        } else {
-            batch_fetch_audio_info(client, &mut video_data_list, &bvids)?;
-        }
+        let video_data = fetch_video_data(client, &bvids[0]).await?;
+        track_list.extend(video_data.to_tracks_by_season());
     } else {
         return Err(App::InvalidInput(
             "请提供正确的 fid 或 bvid 或 sid".to_string(),
         ));
     }
 
-    Ok(video_data_list)
+    if track_list.is_empty() {
+        return Err(App::InvalidInput(
+            "提供的 bvid 或 fid 或 sid 无效或没有找到相关的视频".to_string(),
+        ));
+    }
+
+    Ok(track_list)
 }
 
 fn batch_fetch_audio_info(
     client: &Client,
-    video_data_list: &mut Vec<VideoData>,
+    track_list: &mut Vec<Track>,
     bvids: &[String],
 ) -> Result<(), App> {
     let (send, recv) = mpsc::channel();
@@ -230,10 +239,10 @@ fn batch_fetch_audio_info(
     drop(send);
 
     for video_data in recv {
-        video_data_list.push(video_data);
+        track_list.extend(video_data.to_tracks_by_season());
     }
 
-    if video_data_list.is_empty() {
+    if track_list.is_empty() {
         return Err(App::InvalidInput(
             "提供的 bvid 无效或没有找到相关的视频".to_string(),
         ));
