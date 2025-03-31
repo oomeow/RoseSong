@@ -141,6 +141,9 @@ fn start_player_and_dbus_listener(
         let audio_player = audio_player.clone();
         async move {
             audio_player.play_playlist().await.unwrap();
+            #[allow(clippy::cast_precision_loss)]
+            let volume = CURRENT_PLAY_INFO.read().await.volume as f64 / 100.0;
+            audio_player.fade_volume(0.0, volume, 5);
         }
     });
 

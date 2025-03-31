@@ -50,6 +50,11 @@ impl PlayerDBus {
         Ok(())
     }
 
+    async fn set_volume(&self, volume: String) -> fdo::Result<()> {
+        self.tx.send(Command::SetVolume(volume)).await.unwrap();
+        Ok(())
+    }
+
     async fn set_mode(&self, mode: String) -> fdo::Result<()> {
         let mode = match mode.as_str() {
             "Loop" => PlayMode::Loop,

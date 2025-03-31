@@ -28,6 +28,7 @@ trait MyPlayer {
     async fn next(&self) -> zbus::Result<()>;
     async fn previous(&self) -> zbus::Result<()>;
     async fn stop(&self) -> zbus::Result<()>;
+    async fn set_volume(&self, vol: &str) -> zbus::Result<()>;
     async fn set_mode(&self, mode: &str) -> zbus::Result<()>;
     async fn playlist_change(&self) -> zbus::Result<()>;
     async fn test_connection(&self) -> zbus::Result<()>;
@@ -73,6 +74,9 @@ enum Commands {
     #[command(about = "停止 RoseSong")]
     Stop,
 
+    #[command(about = "设置音量大小")]
+    Vol(VolumeCommand),
+
     #[command(about = "设置播放模式")]
     Mode(ModeCommand),
 
@@ -99,6 +103,16 @@ enum Commands {
 struct PlayCommand {
     #[arg(short = 'b', long = "bvid", help = "要播放的 bvid")]
     bvid: Option<String>,
+}
+
+#[derive(Parser)]
+struct VolumeCommand {
+    #[arg(short = 'u', long = "up", action = clap::ArgAction::SetTrue, help = "音量加一")]
+    up: bool,
+    #[arg(short = 'd', long = "down", action = clap::ArgAction::SetTrue, help = "音量减一")]
+    down: bool,
+    #[arg(short = 'v', long = "value", help = "设置音量大小")]
+    value: Option<f64>,
 }
 
 #[derive(Parser)]
@@ -177,6 +191,7 @@ struct Playlist {
 #[derive(Deserialize)]
 struct CurrentPlayInfo {
     index: usize,
+    volume: usize,
     play_mode: PlayMode,
     track: Option<Track>,
 }
@@ -219,6 +234,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Next => handle_next_command(&proxy).await,
             Commands::Prev => handle_previous_command(&proxy).await,
             Commands::Stop => handle_stop_command(&proxy).await,
+            Commands::Vol(vol_cmd) => handle_volume_command(vol_cmd, &proxy).await,
             Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
             Commands::Add(add_cmd) => {
                 add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
@@ -302,6 +318,30 @@ async fn handle_stop_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
         println!("rosesong 已退出");
     } else {
         println!("{}", "rosesong 没有处于运行状态".red());
+    }
+    Ok(())
+}
+
+async fn handle_volume_command(vol_cmd: VolumeCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
+    if !is_rosesong_running(proxy).await? {
+        println!("{}", "rosesong 没有处于运行状态".red());
+    } else if is_playlist_empty().await? {
+        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+    } else if vol_cmd.up {
+        proxy.set_volume("up").await?;
+        println!("增加音量");
+    } else if vol_cmd.down {
+        proxy.set_volume("down").await?;
+        println!("减少音量");
+    } else if let Some(size) = vol_cmd.value {
+        if size < 0.0 {
+            println!("{}", "音量不能低于0".red());
+        } else if size > 100.0 {
+            println!("{}", "音量不能超过100".red());
+        } else {
+            proxy.set_volume(&size.to_string()).await?;
+            println!("设置音量为 {size}");
+        }
     }
     Ok(())
 }
@@ -672,6 +712,11 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     println!(
         "播放模式：{}",
         current_play_info.play_mode.to_string().cyan()
+    );
+
+    println!(
+        "音量大小：{}",
+        format!("{}%", current_play_info.volume).cyan()
     );
 
     let playlist_path = initialize_directories().await?.join("playlist.toml");

@@ -13,25 +13,43 @@ pub static PLAYLIST: LazyLock<RwLock<Result<Playlist, App>>> =
 pub static CURRENT_PLAY_INFO: LazyLock<RwLock<CurrentPlayInfo>> =
     LazyLock::new(|| RwLock::new(CurrentPlayInfo::default()));
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PlayMode {
-    #[default]
     Loop,
     Shuffle,
     Repeat,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CurrentPlayInfo {
     pub index: usize,
+    pub volume: usize,
     pub play_mode: PlayMode,
     pub track: Option<Track>,
+}
+
+impl Default for CurrentPlayInfo {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            volume: 100,
+            play_mode: PlayMode::Loop,
+            track: None,
+        }
+    }
 }
 
 impl CurrentPlayInfo {
     pub async fn set_play_mode(&mut self, mode: PlayMode) -> Result<(), App> {
         self.play_mode = mode;
+        self.save_to_file().await?;
+        Ok(())
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub async fn set_volume(&mut self, volume: f64) -> Result<(), App> {
+        self.volume = (volume * 100.0) as usize;
         self.save_to_file().await?;
         Ok(())
     }
