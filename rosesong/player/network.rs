@@ -74,21 +74,35 @@ pub async fn set_pipeline_uri_with_headers(pipeline: &Pipeline, url: &str) -> Re
     source.set_property("extra-headers", &headers);
     source.set_property("timeout", 5u32);
 
+    // 创建 queue 作为缓存
+    let queue = gstreamer::ElementFactory::make("queue")
+        .build()
+        .map_err(|_| App::Element("Failed to create queue element".to_string()))?;
+    queue.set_property("max-size-buffers", 100u32);
+    queue.set_property("max-size-time", 5 * gstreamer::ClockTime::SECOND);
+
     let decodebin = gstreamer::ElementFactory::make("decodebin")
         .build()
         .map_err(|_| App::Element("Failed to create decodebin element".to_string()))?;
 
     pipeline
-        .add_many([&source, &decodebin])
+        .add_many([&source, &queue, &decodebin])
         .map_err(|_| App::Pipeline("Failed to add elements to pipeline".to_string()))?;
     source
+        .link(&queue)
+        .map_err(|_| App::Link("Failed to link source to queue".to_string()))?;
+    queue
         .link(&decodebin)
-        .map_err(|_| App::Link("Failed to link source to decodebin".to_string()))?;
+        .map_err(|_| App::Link("Failed to link queue to decodebin".to_string()))?;
 
     let pipeline_weak = pipeline.downgrade();
 
     decodebin.connect_pad_added(move |_, src_pad| {
         if let Some(pipeline) = pipeline_weak.upgrade() {
+            let queue = gstreamer::ElementFactory::make("queue")
+                .build()
+                .expect("Failed to create queue element");
+
             let audioconvert = gstreamer::ElementFactory::make("audioconvert")
                 .build()
                 .expect("Failed to create audioconvert element");
@@ -100,9 +114,12 @@ pub async fn set_pipeline_uri_with_headers(pipeline: &Pipeline, url: &str) -> Re
                 .expect("Failed to create autoaudiosink element");
 
             pipeline
-                .add_many([&audioconvert, &audioresample, &autoaudiosink])
+                .add_many([&queue, &audioconvert, &audioresample, &autoaudiosink])
                 .expect("Failed to add elements to pipeline");
 
+            queue
+                .sync_state_with_parent()
+                .expect("Failed to sync_state_with_parent for queue");
             audioconvert
                 .sync_state_with_parent()
                 .expect("Failed to sync_state_with_parent for audioconvert");
@@ -113,10 +130,16 @@ pub async fn set_pipeline_uri_with_headers(pipeline: &Pipeline, url: &str) -> Re
                 .sync_state_with_parent()
                 .expect("Failed to sync_state_with_parent for autoaudiosink");
 
-            let audio_pad = audioconvert
+            let queue_src_pad = queue.static_pad("src").expect("Failed to get static pad");
+            let audio_sink_pad = audioconvert
                 .static_pad("sink")
                 .expect("Failed to get static pad");
-            src_pad.link(&audio_pad).expect("Failed to link pads");
+            queue_src_pad
+                .link(&audio_sink_pad)
+                .expect("Failed to link pads");
+
+            let queue_sink_pad = queue.static_pad("sink").expect("Failed to get static pad");
+            src_pad.link(&queue_sink_pad).expect("Failed to link pads");
 
             audioconvert
                 .link(&audioresample)
