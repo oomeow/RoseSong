@@ -153,6 +153,22 @@ struct Track {
     owner: String,
 }
 
+impl Track {
+    pub fn to_println_string(&self) -> String {
+        format!(
+            "{} {}, {} {}, {} {}, {} {}",
+            "bvid:".black(),
+            self.bvid.yellow(),
+            "cid:".black(),
+            self.cid,
+            "title:".black(),
+            self.title.cyan(),
+            "owner:".black(),
+            self.owner
+        )
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Playlist {
     tracks: Vec<Track>,
@@ -568,20 +584,12 @@ async fn find_track(
     }
     if results.is_empty() {
         println!("没有找到符合条件的track");
-    } else {
-        for track in results {
-            println!(
-                "{}: {}, {} {}, {} {}, {} {}",
-                "bvid:".black(),
-                track.bvid.yellow(),
-                "cid:".black(),
-                track.cid,
-                "title:".black(),
-                track.title.cyan(),
-                "owner:".black(),
-                track.owner
-            );
+    } else if results.len() <= 15 {
+        for (i, track) in results.iter().enumerate() {
+            println!("{:<2}. {}", i + 1, track.to_println_string());
         }
+    } else {
+        show_tracks_page(results).await;
     }
     Ok(())
 }
@@ -596,6 +604,11 @@ async fn display_playlist() -> StdResult<()> {
     let playlist: Playlist = toml::from_str(&content)
         .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
     let tracks = playlist.tracks;
+    show_tracks_page(tracks).await;
+    Ok(())
+}
+
+async fn show_tracks_page(tracks: Vec<Track>) {
     let total_tracks = tracks.len();
     let page_size = 10;
     let total_pages = total_tracks.div_ceil(page_size);
@@ -604,23 +617,12 @@ async fn display_playlist() -> StdResult<()> {
         let start = (current_page - 1) * page_size;
         let end = (start + page_size).min(total_tracks);
         for (i, track) in tracks[start..end].iter().enumerate() {
-            println!(
-                "{:<2}. {} {}, {} {}, {} {}, {} {}",
-                start + i + 1,
-                "bvid:".black(),
-                track.bvid.yellow(),
-                "cid:".black(),
-                track.cid,
-                "title:".black(),
-                track.title.cyan(),
-                "owner:".black(),
-                track.owner
-            );
+            println!("{:<2}. {}", start + i + 1, track.to_println_string());
         }
         print!(
             "{}",
             format!(
-                "当前第 {} 页, 请输入页码 (1-{})，或输入 'q' 退出：",
+                "当前第 {} 页, 请输入页码 [1-{}], 或输入 'q' 退出：",
                 current_page.to_string().green(),
                 total_pages
             )
@@ -645,7 +647,6 @@ async fn display_playlist() -> StdResult<()> {
         }
         println!("\n");
     }
-    Ok(())
 }
 
 async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
