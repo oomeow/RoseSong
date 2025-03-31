@@ -54,6 +54,16 @@ async fn main() -> Result<(), App> {
 
     // Logger setup
     Logger::try_with_str("info")?
+        .format(|w, _, record| {
+            write!(
+                w,
+                "{} [{}:{}] {}",
+                record.level(),
+                record.module_path().unwrap_or("<unknown>"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+        })
         .log_to_file(FileSpec::default().directory(&required_dirs[0]))
         .rotate(
             Criterion::Size(1_000_000),

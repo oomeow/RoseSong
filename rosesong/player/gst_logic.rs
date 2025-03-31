@@ -315,10 +315,23 @@ async fn play_track(pipeline: &Pipeline, client: &Client) -> Result<(), App> {
         .set_state(gstreamer::State::Ready)
         .map_err(|_| App::State("Failed to set pipeline to Ready".to_string()))?;
 
-    let track = get_current_track().await?;
-    let url = fetch_and_verify_audio_url(client, &track.bvid, &track.cid).await?;
-
-    set_pipeline_uri_with_headers(pipeline, &url).await?;
+    let mut retries = 5;
+    let play_mode = CURRENT_PLAY_INFO.read().await.play_mode;
+    loop {
+        if retries == 0 {
+            return Err(App::Fetch(
+                "Max retries reached for play next song".to_string(),
+            ));
+        }
+        let track = get_current_track().await?;
+        if let Ok(url) = fetch_and_verify_audio_url(client, &track.bvid, &track.cid).await {
+            set_pipeline_uri_with_headers(pipeline, &url).await?;
+            break;
+        }
+        log::info!("Failed to fetch audio URL, play next song");
+        move_to_next_track(play_mode).await?;
+        retries -= 1;
+    }
 
     pipeline
         .set_state(gstreamer::State::Playing)
