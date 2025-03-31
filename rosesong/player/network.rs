@@ -72,6 +72,7 @@ pub async fn set_pipeline_uri_with_headers(pipeline: &Pipeline, url: &str) -> Re
     );
     headers.set("Referer", "https://www.bilibili.com");
     source.set_property("extra-headers", &headers);
+    source.set_property("timeout", 5u32);
 
     let decodebin = gstreamer::ElementFactory::make("decodebin")
         .build()

@@ -193,11 +193,11 @@ async fn main() -> StdResult<()> {
 
 async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
     if let Some(shell) = cli.generator {
-        generate_completion(shell)?;
+        generate_completion(shell);
         return Ok(());
     }
     if let Some(cmd) = cli.command {
-        return match cmd {
+        match cmd {
             Commands::Play(play_cmd) => handle_play_command(play_cmd, &proxy).await,
             Commands::Pause => handle_pause_command(&proxy).await,
             Commands::Next => handle_next_command(&proxy).await,
@@ -223,11 +223,10 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::List => display_playlist().await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
-        };
+        }
     } else {
-        display_status(&proxy).await?;
+        display_status(&proxy).await
     }
-    Ok(())
 }
 
 async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
@@ -699,9 +698,8 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     Ok(())
 }
 
-fn generate_completion(shell: Shell) -> Result<(), App> {
+fn generate_completion(shell: Shell) {
     let mut cmd = Cli::command();
     let bin_name = cmd.get_name().to_string();
     generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
-    Ok(())
 }
