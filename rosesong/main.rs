@@ -65,6 +65,7 @@ async fn main() -> Result<(), App> {
             )
         })
         .log_to_file(FileSpec::default().directory(&required_dirs[0]))
+        // .duplicate_to_stdout(Duplicate::All) // for debug
         .rotate(
             Criterion::Size(1_000_000),
             Naming::Timestamps,
@@ -143,7 +144,7 @@ fn start_player_and_dbus_listener(
             audio_player.play_playlist().await.unwrap();
             #[allow(clippy::cast_precision_loss)]
             let volume = CURRENT_PLAY_INFO.read().await.volume as f64 / 100.0;
-            audio_player.fade_volume(0.0, volume, 5);
+            audio_player.fade_volume(0.0, volume, 3);
         }
     });
 

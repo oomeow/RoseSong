@@ -104,15 +104,11 @@ impl Audio {
         });
     }
     /// 渐变调整音量（单位：秒）
-    #[allow(clippy::cast_precision_loss)]
-    pub fn fade_volume(&self, start: f64, target: f64, duration_sec: u64) {
-        let current = start;
+    pub fn fade_volume(&self, start: f64, target: f64, duration_sec: u8) {
         let all_step = duration_sec * 10;
-        let delta = (target - current) / all_step as f64;
-
+        let delta = (target - start) / f64::from(all_step);
         for step in 0..=all_step {
-            let new_vol = current + delta * step as f64;
-            log::info!("fade volume change: {}", new_vol);
+            let new_vol = start + delta * f64::from(step);
             self.volume_ele.set_property("volume", new_vol);
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -322,30 +318,37 @@ async fn handle_previous_track(
 }
 
 async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> Result<(), App> {
+    log::info!("----------------------> volume <-------------------------");
     let current_volume = volume_ele.property::<f64>("volume");
+    log::info!("Current volume before: {}", current_volume);
+    let current_volume = (current_volume * 100.0).round() / 100.0;
+    log::info!("Current volume after: {}", current_volume);
     let new_volume = match vol.as_str() {
         "up" => {
-            if current_volume + 0.1 <= 1.0 {
-                current_volume + 0.1
+            let vol = ((current_volume + 0.05) * 100.0).round() / 100.0;
+            if vol <= 1.0 {
+                vol
             } else {
                 1.0
             }
         }
         "down" => {
-            if current_volume - 0.1 > 0.0 {
-                current_volume - 0.1
+            let vol = ((current_volume - 0.05) * 100.0).round() / 100.0;
+            if vol > 0.0 {
+                vol
             } else {
                 0.0
             }
         }
         _ => {
-            if let Ok(parsed_volume) = vol.parse::<f64>() {
-                (parsed_volume).clamp(0.0, 100.0) / 100.0
+            if let Ok(parsed_volume) = vol.parse::<u8>() {
+                f64::from(parsed_volume) / 100.0
             } else {
                 1.0
             }
         }
     };
+    log::info!("set new volume: {}", new_volume);
     volume_ele.set_property("volume", new_volume);
     CURRENT_PLAY_INFO.write().await.set_volume(new_volume).await
 }

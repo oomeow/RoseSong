@@ -107,12 +107,12 @@ struct PlayCommand {
 
 #[derive(Parser)]
 struct VolumeCommand {
-    #[arg(short = 'u', long = "up", action = clap::ArgAction::SetTrue, help = "音量加一")]
+    #[arg(short = 'u', long = "up", action = clap::ArgAction::SetTrue, help = "音量增加 5%")]
     up: bool,
-    #[arg(short = 'd', long = "down", action = clap::ArgAction::SetTrue, help = "音量减一")]
+    #[arg(short = 'd', long = "down", action = clap::ArgAction::SetTrue, help = "音量减少 5%")]
     down: bool,
-    #[arg(short = 'v', long = "value", help = "设置音量大小")]
-    value: Option<f64>,
+    #[arg(short = 'v', long = "value", help = "设置音量大小 [0~100]")]
+    value: Option<usize>,
 }
 
 #[derive(Parser)]
@@ -329,18 +329,16 @@ async fn handle_volume_command(vol_cmd: VolumeCommand, proxy: &MyPlayerProxy<'_>
         println!("{}", "当前播放列表为空，请先添加歌曲".red());
     } else if vol_cmd.up {
         proxy.set_volume("up").await?;
-        println!("增加音量");
+        println!("增加 5% 音量");
     } else if vol_cmd.down {
         proxy.set_volume("down").await?;
-        println!("减少音量");
-    } else if let Some(size) = vol_cmd.value {
-        if size < 0.0 {
-            println!("{}", "音量不能低于0".red());
-        } else if size > 100.0 {
-            println!("{}", "音量不能超过100".red());
+        println!("减少 5% 音量");
+    } else if let Some(value) = vol_cmd.value {
+        if value > 100 {
+            println!("{}", "音量不能超过 100".red());
         } else {
-            proxy.set_volume(&size.to_string()).await?;
-            println!("设置音量为 {size}");
+            proxy.set_volume(&value.to_string()).await?;
+            println!("设置音量为 {value}%");
         }
     }
     Ok(())
