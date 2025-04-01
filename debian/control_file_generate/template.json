@@ -1,0 +1,7 @@
+{
+  "Package": "rosesong",
+  "Version": "1.0.0",
+  "Architecture": "amd64",
+  "Maintainer": "oomeow",
+  "Description": "Command line player built by rust based on gstreamer decoding and playing bilibili audio, using dbus for inter-process communication. Command line player built by rust based on gstreamer decoding and playing bilibili audio, using dbus for inter-process communication."
+}

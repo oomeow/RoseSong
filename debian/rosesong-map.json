@@ -1,0 +1,14 @@
+[
+  {
+    "name": "control",
+    "path": "/DEBIAN/"
+  },
+  {
+    "name": "rosesong",
+    "path": "/usr/bin/"
+  },
+  {
+    "name": "rsg",
+    "path": "/usr/bin/"
+  }
+]
