@@ -92,6 +92,9 @@ enum Commands {
     #[command(about = "显示播放列表")]
     List,
 
+    #[command(about = "显示全部歌曲", hide = true)]
+    ListAll,
+
     #[command(about = "启动 RoseSong")]
     Start,
 
@@ -139,8 +142,8 @@ struct AddCommand {
 struct FindCommand {
     #[arg(short = 'b', long = "bvid", help = "按 bvid 查找")]
     bvid: Option<String>,
-    #[arg(short = 'c', long = "cid", help = "按 cid 查找")]
-    cid: Option<String>,
+    // #[arg(short = 'c', long = "cid", help = "按 cid 查找")]
+    // cid: Option<String>,
     #[arg(short = 't', long = "title", help = "按标题查找")]
     title: Option<String>,
     #[arg(short = 'o', long = "owner", help = "按作者查找")]
@@ -151,8 +154,8 @@ struct FindCommand {
 struct DeleteCommand {
     #[arg(short = 'b', long = "bvid", help = "按 bvid 删除")]
     bvid: Option<String>,
-    #[arg(short = 'c', long = "cid", help = "按 cid 删除")]
-    cid: Option<String>,
+    // #[arg(short = 'c', long = "cid", help = "按 cid 删除")]
+    // cid: Option<String>,
     #[arg(short = 'o', long = "owner", help = "按作者删除")]
     owner: Option<String>,
     #[arg(short = 'a', long = "all", help = "删除所有曲目")]
@@ -240,19 +243,13 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
                 add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
             }
             Commands::Delete(delete_cmd) => {
-                delete_tracks(
-                    delete_cmd.bvid,
-                    delete_cmd.cid,
-                    delete_cmd.owner,
-                    delete_cmd.all,
-                    &proxy,
-                )
-                .await
+                delete_tracks(delete_cmd.bvid, delete_cmd.owner, delete_cmd.all, &proxy).await
             }
             Commands::Find(find_cmd) => {
-                find_track(find_cmd.bvid, find_cmd.cid, find_cmd.title, find_cmd.owner).await
+                find_track(find_cmd.bvid, find_cmd.title, find_cmd.owner).await
             }
             Commands::List => display_playlist().await,
+            Commands::ListAll => list_all_tracks().await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
         }
@@ -479,14 +476,13 @@ async fn import_favorite_or_bvid_or_cid(
 
 async fn delete_tracks(
     bvid: Option<String>,
-    cid: Option<String>,
     owner: Option<String>,
     all: bool,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    perform_deletion(bvid, cid, owner, all).await?;
+    perform_deletion(bvid, owner, all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     if old_content != new_content {
         if let Ok(is_running) = is_rosesong_running(proxy).await {
@@ -502,12 +498,7 @@ async fn delete_tracks(
     Ok(())
 }
 
-async fn perform_deletion(
-    bvid: Option<String>,
-    cid: Option<String>,
-    owner: Option<String>,
-    all: bool,
-) -> StdResult<()> {
+async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     if !playlist_path.exists() {
         println!("{}", "播放列表文件不存在".red());
@@ -540,15 +531,6 @@ async fn perform_deletion(
                 .tracks
                 .iter()
                 .filter(|track| track.bvid == bvid)
-                .cloned(),
-        );
-    }
-    if let Some(cid) = cid {
-        tracks_to_delete.extend(
-            playlist
-                .tracks
-                .iter()
-                .filter(|track| track.cid == cid)
                 .cloned(),
         );
     }
@@ -595,7 +577,6 @@ async fn perform_deletion(
 
 async fn find_track(
     bvid: Option<String>,
-    cid: Option<String>,
     title: Option<String>,
     owner: Option<String>,
 ) -> StdResult<()> {
@@ -610,9 +591,6 @@ async fn find_track(
     let mut results = playlist.tracks.clone();
     if let Some(bvid) = bvid {
         results.retain(|track| track.bvid == bvid);
-    }
-    if let Some(cid) = cid {
-        results.retain(|track| track.cid == cid);
     }
     if let Some(title) = title {
         results.retain(|track| track.title.contains(&title));
@@ -643,6 +621,20 @@ async fn display_playlist() -> StdResult<()> {
         .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
     let tracks = playlist.tracks;
     show_tracks_page(tracks).await;
+    Ok(())
+}
+
+async fn list_all_tracks() -> StdResult<()> {
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    if playlist_path.exists() {
+        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
+        let playlist: Playlist = toml::from_str(&content)
+            .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
+        let tracks = playlist.tracks;
+        for track in tracks {
+            println!("{},{} - {}", track.bvid, track.title, track.owner);
+        }
+    }
     Ok(())
 }
 

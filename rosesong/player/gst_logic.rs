@@ -269,12 +269,11 @@ async fn handle_play_bvid(
     volume_ele: &gstreamer::Element,
     client: &Client,
 ) -> Result<(), App> {
-    let new_index;
-    {
+    let new_index = {
         let playlist = PLAYLIST.read().await;
         let playlist = playlist.as_ref().unwrap();
-        new_index = playlist.find_track_index(new_bvid);
-    }
+        playlist.find_track_index(new_bvid)
+    };
 
     if let Some(index) = new_index {
         set_current_track_index(index).await.ok();

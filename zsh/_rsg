@@ -1,0 +1,429 @@
+#compdef rsg
+
+autoload -U is-at-least
+
+_rsg() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+        '--generate=[]:shell:(bash elvish fish powershell zsh)' \
+        '-h[Print help (see more with '\''--help'\'')]' \
+        '--help[Print help (see more with '\''--help'\'')]' \
+        '-V[Print version]' \
+        '--version[Print version]' \
+        ":: :_rsg_commands" \
+        "*::: :->rsg" \
+        && ret=0
+    case $state in
+    (rsg)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:rsg-command-$line[1]:"
+        case $line[1] in
+        (play)
+            _arguments "${_arguments_options[@]}" : \
+            '-b+[要播放的 bvid]:BVID:_rsg_bvids' \
+            '--bvid=[要播放的 bvid]:BVID:_rsg_bvids' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (pause)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (next)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (prev)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (stop)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (vol)
+            _arguments "${_arguments_options[@]}" : \
+            '-v+[设置音量大小 \[0~100\]]:VALUE:_default' \
+            '--value=[设置音量大小 \[0~100\]]:VALUE:_default' \
+            '-u[音量增加 5%]' \
+            '--up[音量增加 5%]' \
+            '-d[音量减少 5%]' \
+            '--down[音量减少 5%]' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (mode)
+            _arguments "${_arguments_options[@]}" : \
+            '-l[设置播放模式为循环播放]' \
+            '--loop[设置播放模式为循环播放]' \
+            '-s[设置播放模式为随机播放]' \
+            '--shuffle[设置播放模式为随机播放]' \
+            '-r[设置播放模式为单曲循环]' \
+            '--repeat[设置播放模式为单曲循环]' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (add)
+            _arguments "${_arguments_options[@]}" : \
+            '-f+[要导入的收藏夹 ID]:FID:_default' \
+            '--fid=[要导入的收藏夹 ID]:FID:_default' \
+            '-b+[要导入的 bvid]:BVID:_default' \
+            '--bvid=[要导入的 bvid]:BVID:_default' \
+            '-s+[要导入的合集 ID]:SID:_default' \
+            '--sid=[要导入的合集 ID]:SID:_default' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (find)
+            _arguments "${_arguments_options[@]}" : \
+            '-b+[按 bvid 查找]:BVID:_default' \
+            '--bvid=[按 bvid 查找]:BVID:_default' \
+            '-t+[按标题查找]:TITLE:_default' \
+            '--title=[按标题查找]:TITLE:_default' \
+            '-o+[按作者查找]:OWNER:_default' \
+            '--owner=[按作者查找]:OWNER:_default' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (delete)
+            _arguments "${_arguments_options[@]}" : \
+            '-b+[按 bvid 删除]:BVID:_rsg_bvids' \
+            '--bvid=[按 bvid 删除]:BVID:_rsg_bvids' \
+            '-o+[按作者删除]:OWNER:_default' \
+            '--owner=[按作者删除]:OWNER:_default' \
+            '-a[删除所有曲目]' \
+            '--all[删除所有曲目]' \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (list)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (list-all)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (start)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (status)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
+        (help)
+            _arguments "${_arguments_options[@]}" : \
+            ":: :_rsg__help_commands" \
+            "*::: :->help" \
+            && ret=0
+
+            case $state in
+            (help)
+                words=($line[1] "${words[@]}")
+                (( CURRENT += 1 ))
+                curcontext="${curcontext%:*:*}:rsg-help-command-$line[1]:"
+                case $line[1] in
+                (play)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (pause)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (next)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (prev)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (stop)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (vol)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (mode)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (add)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (find)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (delete)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (list)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (list-all)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (start)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (status)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                (help)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
+                esac
+                ;;
+            esac
+            ;;
+        esac
+        ;;
+    esac
+}
+
+(( $+functions[_rsg_commands] )) ||
+_rsg_commands() {
+    local commands; commands=(
+'play:播放指定歌曲或继续播放' \
+'pause:暂停播放' \
+'next:播放下一首歌曲' \
+'prev:播放上一首歌曲' \
+'stop:停止 RoseSong' \
+'vol:设置音量大小' \
+'mode:设置播放模式' \
+'add:添加歌曲到播放列表' \
+'find:在播放列表中查找歌曲' \
+'delete:从播放列表中删除歌曲' \
+'list:显示播放列表' \
+'list-all:显示全部歌曲' \
+'start:启动 RoseSong' \
+'status:显示当前播放的歌曲信息' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'rsg commands' commands "$@"
+}
+(( $+functions[_rsg__add_commands] )) ||
+_rsg__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg add commands' commands "$@"
+}
+(( $+functions[_rsg__delete_commands] )) ||
+_rsg__delete_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg delete commands' commands "$@"
+}
+(( $+functions[_rsg__find_commands] )) ||
+_rsg__find_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg find commands' commands "$@"
+}
+(( $+functions[_rsg__help_commands] )) ||
+_rsg__help_commands() {
+    local commands; commands=(
+'play:播放指定歌曲或继续播放' \
+'pause:暂停播放' \
+'next:播放下一首歌曲' \
+'prev:播放上一首歌曲' \
+'stop:停止 RoseSong' \
+'vol:设置音量大小' \
+'mode:设置播放模式' \
+'add:添加歌曲到播放列表' \
+'find:在播放列表中查找歌曲' \
+'delete:从播放列表中删除歌曲' \
+'list:显示播放列表' \
+'list-all:显示全部歌曲' \
+'start:启动 RoseSong' \
+'status:显示当前播放的歌曲信息' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'rsg help commands' commands "$@"
+}
+(( $+functions[_rsg__help__add_commands] )) ||
+_rsg__help__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help add commands' commands "$@"
+}
+(( $+functions[_rsg__help__delete_commands] )) ||
+_rsg__help__delete_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help delete commands' commands "$@"
+}
+(( $+functions[_rsg__help__find_commands] )) ||
+_rsg__help__find_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help find commands' commands "$@"
+}
+(( $+functions[_rsg__help__help_commands] )) ||
+_rsg__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help help commands' commands "$@"
+}
+(( $+functions[_rsg__help__list_commands] )) ||
+_rsg__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help list commands' commands "$@"
+}
+(( $+functions[_rsg__help__list-all_commands] )) ||
+_rsg__help__list-all_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help list-all commands' commands "$@"
+}
+(( $+functions[_rsg__help__mode_commands] )) ||
+_rsg__help__mode_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help mode commands' commands "$@"
+}
+(( $+functions[_rsg__help__next_commands] )) ||
+_rsg__help__next_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help next commands' commands "$@"
+}
+(( $+functions[_rsg__help__pause_commands] )) ||
+_rsg__help__pause_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help pause commands' commands "$@"
+}
+(( $+functions[_rsg__help__play_commands] )) ||
+_rsg__help__play_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help play commands' commands "$@"
+}
+(( $+functions[_rsg__help__prev_commands] )) ||
+_rsg__help__prev_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help prev commands' commands "$@"
+}
+(( $+functions[_rsg__help__start_commands] )) ||
+_rsg__help__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help start commands' commands "$@"
+}
+(( $+functions[_rsg__help__status_commands] )) ||
+_rsg__help__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help status commands' commands "$@"
+}
+(( $+functions[_rsg__help__stop_commands] )) ||
+_rsg__help__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help stop commands' commands "$@"
+}
+(( $+functions[_rsg__help__vol_commands] )) ||
+_rsg__help__vol_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help vol commands' commands "$@"
+}
+(( $+functions[_rsg__list_commands] )) ||
+_rsg__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg list commands' commands "$@"
+}
+(( $+functions[_rsg__list-all_commands] )) ||
+_rsg__list-all_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg list-all commands' commands "$@"
+}
+(( $+functions[_rsg__mode_commands] )) ||
+_rsg__mode_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg mode commands' commands "$@"
+}
+(( $+functions[_rsg__next_commands] )) ||
+_rsg__next_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg next commands' commands "$@"
+}
+(( $+functions[_rsg__pause_commands] )) ||
+_rsg__pause_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg pause commands' commands "$@"
+}
+(( $+functions[_rsg__play_commands] )) ||
+_rsg__play_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg play commands' commands "$@"
+}
+(( $+functions[_rsg__prev_commands] )) ||
+_rsg__prev_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg prev commands' commands "$@"
+}
+(( $+functions[_rsg__start_commands] )) ||
+_rsg__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg start commands' commands "$@"
+}
+(( $+functions[_rsg__status_commands] )) ||
+_rsg__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg status commands' commands "$@"
+}
+(( $+functions[_rsg__stop_commands] )) ||
+_rsg__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg stop commands' commands "$@"
+}
+(( $+functions[_rsg__vol_commands] )) ||
+_rsg__vol_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg vol commands' commands "$@"
+}
+
+# 通过 `rsg list-all` 获取 BVID 并进行动态补全
+(( $+functions[_rsg_bvids] )) ||
+_rsg_bvids() {
+    local -a songs
+    songs=("${(@f)$(rsg list-all | awk -F ',' '{print $1":"$2}')}")
+    _describe -t bvids 'BVIDs' songs
+}
+
+if [ "$funcstack[1]" = "_rsg" ]; then
+    _rsg "$@"
+else
+    compdef _rsg rsg
+fi
