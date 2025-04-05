@@ -56,13 +56,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
+      - name: Build for Debian
+        uses: ./.github/actions/build-for-debian
 
       - name: Copy Artifacts to Debian Directory
-        run: cp -r ./artifacts/* ./debian/input/
+        run: |
+          mkdir ./debian/input
+          cp ./target/release/rosesong ./debian/input/
+          cp ./target/release/rsg ./debian/input/
+          chmod +x ./debian/input/*
 
       - name: Generate Control File
         id: control-gen
@@ -91,6 +93,11 @@ jobs:
           package_name: "rosesong"
           package_version: "1.0.0"
           package_arch: "amd64"
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
 
       - name: Copy Generated Package to Artifacts Directory
         run: cp ${{ steps.container.outputs.generated_package_path }} ./artifacts/

@@ -1,0 +1,10 @@
+name: "Build for Debian"
+description: "Build for Debian"
+
+branding:
+  icon: user-check
+  color: gray-dark
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
