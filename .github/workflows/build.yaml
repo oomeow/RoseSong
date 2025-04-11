@@ -99,8 +99,11 @@ jobs:
         with:
           path: ./artifacts
 
+      - name: List Artifacts Directory
+        run: ls -R ./artifacts
+
       - name: Copy Generated Package to Artifacts Directory
-        run: cp ${{ steps.container.outputs.generated_package_path }} ./artifacts/
+        run: cp ${{ steps.container.outputs.generated_package_path }} ./artifacts
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
@@ -111,4 +114,4 @@ jobs:
           body: "This is a alpha version of Rosesong."
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
-            ./artifacts/*
+            ./artifacts/**
