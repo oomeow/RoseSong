@@ -245,7 +245,9 @@ impl Audio {
                             }
                         }
                         Command::ReloadPlaylist => {
-                            if let Err(e) = handle_reload_playlist().await {
+                            if let Err(e) =
+                                handle_reload_playlist(&pipeline, &volume_ele, &client).await
+                            {
                                 error!("Failed to reload playlist: {}", e);
                             }
                         }
@@ -352,16 +354,24 @@ async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> R
     CURRENT_PLAY_INFO.write().await.set_volume(new_volume).await
 }
 
-async fn handle_reload_playlist() -> Result<(), App> {
-    let playlist = PLAYLIST.read().await;
-    let playlist = playlist.as_ref().unwrap();
+async fn handle_reload_playlist(
+    pipeline: &Pipeline,
+    volume_ele: &gstreamer::Element,
+    client: &Client,
+) -> Result<(), App> {
     let current_index = get_current_track_index().await;
     let current_track = get_current_track().await;
 
     load().await?;
 
+    let playlist = {
+        let playlist_ = PLAYLIST.read().await;
+        playlist_.clone().unwrap_or_default()
+    };
+
     let should_play = {
         if let Ok(current_track) = current_track {
+            // 这个 if 条件应该是多余的，因为在添加歌曲过程中，已经合并同 bvid 的歌曲信息了，只保留其中一个
             if let Some(new_index) = playlist.find_track_index(&current_track.bvid) {
                 set_current_track_index(new_index).await.ok();
                 info!(
@@ -386,13 +396,6 @@ async fn handle_reload_playlist() -> Result<(), App> {
     };
 
     if should_play {
-        let pipeline = Arc::new(gstreamer::Pipeline::new());
-        let volume_ele = Arc::new(
-            gstreamer::ElementFactory::make("volume")
-                .build()
-                .map_err(|_| App::Element("Faile to create volume Element".to_string()))?,
-        );
-        let client = Arc::new(Client::new());
         play_track(&pipeline, &volume_ele, &client).await?;
     }
 

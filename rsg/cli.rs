@@ -1,8 +1,6 @@
 mod bilibili;
 mod error;
 
-extern crate colored;
-
 use bilibili::fetch_audio_info::get_tracks;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
