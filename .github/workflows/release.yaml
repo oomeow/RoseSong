@@ -1,8 +1,6 @@
-name: Build RoseSong
+name: Release RoseSong
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -55,6 +53,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Version
+        run: |
+          VERSION=$(awk -F'"' '/version[[:space:]]*=[[:space:]]*"/ { print $2; exit }' Cargo.toml)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Build for Debian
         uses: ./.github/actions/build-for-debian
 
@@ -90,7 +93,7 @@ jobs:
           output_dir: "output"
           layout_map_file: "debian/rosesong-map.json"
           package_name: "rosesong"
-          package_version: "1.0.0"
+          package_version: ${{ env.VERSION }}
           package_arch: "amd64"
 
       - name: Download All Artifacts
@@ -107,9 +110,8 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: alpha
-          name: "Rosesong Alpha"
-          prerelease: true
-          body: "This is a alpha version of Rosesong."
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
           files: ./artifacts/**
