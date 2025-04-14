@@ -291,7 +291,7 @@ pub async fn update_current_play_tracks(
     current_play_info.index = new_index;
     current_play_info.playing_sid = sid;
     current_play_info.current_tracks.clone_from(&tracks);
-    current_play_info.track = tracks.first().cloned();
+    current_play_info.track = tracks.get(new_index).cloned();
     current_play_info.save_to_file().await?;
     Ok(())
 }
