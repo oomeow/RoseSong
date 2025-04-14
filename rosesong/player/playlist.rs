@@ -8,8 +8,12 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
 // global variables
-pub static PLAYLIST: LazyLock<RwLock<Result<Playlist, App>>> =
-    LazyLock::new(|| RwLock::new(Ok(Playlist { tracks: Vec::new() })));
+pub static PLAYLIST: LazyLock<RwLock<Result<Playlist, App>>> = LazyLock::new(|| {
+    RwLock::new(Ok(Playlist {
+        tracks: Vec::new(),
+        seasons: Vec::new(),
+    }))
+});
 pub static CURRENT_PLAY_INFO: LazyLock<RwLock<CurrentPlayInfo>> =
     LazyLock::new(|| RwLock::new(CurrentPlayInfo::default()));
 
@@ -27,6 +31,8 @@ pub struct CurrentPlayInfo {
     pub volume: usize,
     pub play_mode: PlayMode,
     pub track: Option<Track>,
+    pub playing_sid: Option<String>,
+    pub current_tracks: Vec<Track>,
 }
 
 impl Default for CurrentPlayInfo {
@@ -36,6 +42,8 @@ impl Default for CurrentPlayInfo {
             volume: 100,
             play_mode: PlayMode::Loop,
             track: None,
+            playing_sid: None,
+            current_tracks: Vec::new(),
         }
     }
 }
@@ -56,9 +64,8 @@ impl CurrentPlayInfo {
 
     pub async fn set_current(&mut self, index: usize) -> Result<(), App> {
         self.index = index + 1;
-        let playlist = Playlist::load_from_file().await?;
-        let track = playlist.get_current_track(index)?;
-        self.track = Some(track);
+        let track = self.current_tracks.get(index).cloned();
+        self.track = track;
         self.save_to_file().await?;
         Ok(())
     }
@@ -96,19 +103,85 @@ impl CurrentPlayInfo {
             .map_err(|_| App::Io("Failed to write playlist file".to_string()))?;
         Ok(())
     }
+
+    pub fn get_current_track(&self) -> Option<Track> {
+        self.current_tracks.get(self.index).cloned()
+    }
+
+    pub fn find_track_index(&self, bvid: &str) -> Option<usize> {
+        self.current_tracks
+            .iter()
+            .position(|track| track.bvid == bvid)
+    }
+
+    pub async fn move_to_next_track(&mut self, play_mode: PlayMode) -> Result<(), App> {
+        let current_index = self.index;
+        let current_tracks_len = self.current_tracks.len();
+        let new_index = match play_mode {
+            PlayMode::Loop => (current_index + 1) % current_tracks_len,
+            PlayMode::Shuffle => {
+                let mut rng = rng();
+                (0..current_tracks_len)
+                    .choose(&mut rng)
+                    .ok_or_else(|| App::DataParsing("Failed to choose random track".to_string()))?
+            }
+            PlayMode::Repeat => current_index,
+        };
+        self.index = new_index;
+        self.track = self.current_tracks.get(new_index).cloned();
+        self.save_to_file().await?;
+        Ok(())
+    }
+
+    pub async fn move_to_previous_track(&mut self, play_mode: PlayMode) -> Result<(), App> {
+        let current_index = self.index;
+        let current_tracks_len = self.current_tracks.len();
+        let new_index = match play_mode {
+            PlayMode::Loop => {
+                if current_index == 0 {
+                    current_tracks_len - 1
+                } else {
+                    current_index - 1
+                }
+            }
+            PlayMode::Shuffle => {
+                let mut rng = rng();
+                (0..current_tracks_len)
+                    .choose(&mut rng)
+                    .ok_or_else(|| App::DataParsing("Failed to choose random track".to_string()))?
+            }
+            PlayMode::Repeat => current_index,
+        };
+        self.index = new_index;
+        self.track = self.current_tracks.get(new_index).cloned();
+        self.save_to_file().await?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Track {
     pub bvid: String,
     pub cid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
     pub title: String,
+    pub owner: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Season {
+    pub id: String,
+    pub title: String,
+    pub cover: Option<String>,
+    pub intro: String,
     pub owner: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Playlist {
     pub tracks: Vec<Track>,
+    pub seasons: Vec<Season>,
 }
 
 impl Playlist {
@@ -123,56 +196,17 @@ impl Playlist {
         Ok(playlist)
     }
 
-    pub fn get_current_track(&self, index: usize) -> Result<Track, App> {
+    pub fn find_tracks_in_season(&self, sid: &str) -> Vec<Track> {
         self.tracks
-            .get(index)
-            .cloned()
-            .ok_or_else(|| App::DataParsing("Track index out of bounds".to_string()))
-    }
-
-    pub async fn move_to_next_track(&mut self, play_mode: PlayMode) -> Result<usize, App> {
-        let current_index = get_current_track_index().await;
-        let new_index = match play_mode {
-            PlayMode::Loop => (current_index + 1) % self.tracks.len(),
-            PlayMode::Shuffle => {
-                let mut rng = rng();
-                (0..self.tracks.len())
-                    .choose(&mut rng)
-                    .ok_or_else(|| App::DataParsing("Failed to choose random track".to_string()))?
-            }
-            PlayMode::Repeat => current_index,
-        };
-        Ok(new_index)
-    }
-
-    pub async fn move_to_previous_track(&mut self, play_mode: PlayMode) -> Result<usize, App> {
-        let current_index = get_current_track_index().await;
-        let new_index = match play_mode {
-            PlayMode::Loop => {
-                if current_index == 0 {
-                    self.tracks.len() - 1
-                } else {
-                    current_index - 1
-                }
-            }
-            PlayMode::Shuffle => {
-                let mut rng = rng();
-                (0..self.tracks.len())
-                    .choose(&mut rng)
-                    .ok_or_else(|| App::DataParsing("Failed to choose random track".to_string()))?
-            }
-            PlayMode::Repeat => current_index,
-        };
-        Ok(new_index)
-    }
-
-    pub fn find_track_index(&self, bvid: &str) -> Option<usize> {
-        self.tracks.iter().position(|track| track.bvid == bvid)
+            .clone()
+            .into_iter()
+            .filter(|t| t.sid == Some(sid.to_string()))
+            .collect::<Vec<Track>>()
     }
 }
 
 pub async fn get_current_track_index() -> usize {
-    CURRENT_PLAY_INFO.read().await.index - 1
+    CURRENT_PLAY_INFO.read().await.index
 }
 
 pub async fn set_current_track_index(index: usize) -> Result<(), App> {
@@ -189,40 +223,75 @@ pub async fn load() -> Result<(), App> {
 
     // current play info
     let mut current_play_info = CurrentPlayInfo::load_from_file().await?;
-    if current_play_info.track.is_none() && !playlist.tracks.is_empty() {
-        current_play_info
-            .set_current(current_play_info.index)
-            .await?;
+    // 初始化播放列表
+    let tracks = if let Some(sid) = current_play_info.playing_sid.clone() {
+        let tracks = playlist.find_tracks_in_season(&sid);
+        current_play_info.current_tracks.clone_from(&tracks);
+        tracks
+    } else {
+        let tracks = playlist.tracks.clone();
+        current_play_info.current_tracks.clone_from(&tracks);
+        tracks
+    };
+    let index = current_play_info.index;
+    if !tracks.is_empty() {
+        if index < tracks.len() {
+            current_play_info.track = tracks.get(index).cloned();
+        } else {
+            current_play_info.track = tracks.first().cloned();
+        }
     }
+    current_play_info.save_to_file().await?;
+    // replace the old current play info with new one
     let mut current_play_info_lock = CURRENT_PLAY_INFO.write().await;
     *current_play_info_lock = current_play_info;
 
     Ok(())
 }
 
+pub async fn get_play_mode() -> Result<PlayMode, App> {
+    let current_play_info = CURRENT_PLAY_INFO.read().await;
+    Ok(current_play_info.play_mode)
+}
+
 pub async fn get_current_track() -> Result<Track, App> {
-    let playlist = PLAYLIST.read().await;
-    let playlist = playlist.as_ref().map_err(std::clone::Clone::clone)?;
-    let index = get_current_track_index().await;
-    playlist.get_current_track(index)
+    let current_play_info = CURRENT_PLAY_INFO.read().await;
+    current_play_info
+        .get_current_track()
+        .ok_or(App::DataParsing("Failed to get current track".to_string()))
 }
 
-pub async fn move_to_next_track(play_mode: PlayMode) -> Result<usize, App> {
-    let index = {
-        let mut playlist = PLAYLIST.write().await;
-        let playlist = playlist.as_mut().map_err(|e| e.clone())?;
-        playlist.move_to_next_track(play_mode).await?
-    };
-    set_current_track_index(index).await?;
-    Ok(index)
+pub async fn move_to_next_track(play_mode: PlayMode) -> Result<(), App> {
+    let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+    current_play_info.move_to_next_track(play_mode).await?;
+    Ok(())
 }
 
-pub async fn move_to_previous_track(play_mode: PlayMode) -> Result<usize, App> {
-    let index = {
-        let mut playlist = PLAYLIST.write().await;
-        let playlist = playlist.as_mut().map_err(|e| e.clone())?;
-        playlist.move_to_previous_track(play_mode).await?
+pub async fn move_to_previous_track(play_mode: PlayMode) -> Result<(), App> {
+    let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+    current_play_info.move_to_previous_track(play_mode).await?;
+    Ok(())
+}
+
+pub async fn update_current_play_tracks(
+    sid: Option<String>,
+    tracks: Vec<Track>,
+) -> Result<(), App> {
+    let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+    let play_mode = current_play_info.play_mode;
+    let new_index = match play_mode {
+        PlayMode::Shuffle => {
+            let mut rng = rng();
+            (0..tracks.len())
+                .choose(&mut rng)
+                .ok_or_else(|| App::DataParsing("Failed to choose random track".to_string()))?
+        }
+        _ => 0,
     };
-    set_current_track_index(index).await?;
-    Ok(index)
+    current_play_info.index = new_index;
+    current_play_info.playing_sid = sid;
+    current_play_info.current_tracks.clone_from(&tracks);
+    current_play_info.track = tracks.first().cloned();
+    current_play_info.save_to_file().await?;
+    Ok(())
 }

@@ -2,7 +2,7 @@
 name = "rosesong"
 version = "1.0.0"
 edition = "2021"
-authors = ["oomeow"]
+authors = ["Florian Liao <huahuadeliaoliao@icloud.com>", "oomeow"]
 description = "Command line player built by rust based on gstreamer decoding and playing bilibili audio, using dbus for inter-process communication."
 license = "MIT"
 repository = "https://github.com/oomeow/RoseSong"

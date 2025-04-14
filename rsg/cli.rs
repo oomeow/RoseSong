@@ -2,11 +2,13 @@ mod bilibili;
 mod error;
 
 use bilibili::fetch_audio_info::get_tracks;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::builder::PossibleValue;
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
 use error::App;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::{fmt::Display, io::Write};
 use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
@@ -22,6 +24,8 @@ type StdResult<T> = std::result::Result<T, App>;
 trait MyPlayer {
     async fn play(&self) -> zbus::Result<()>;
     async fn play_bvid(&self, bvid: &str) -> zbus::Result<()>;
+    async fn play_sid(&self, sid: &str) -> zbus::Result<()>;
+    async fn play_all(&self) -> zbus::Result<()>;
     async fn pause(&self) -> zbus::Result<()>;
     async fn next(&self) -> zbus::Result<()>;
     async fn previous(&self) -> zbus::Result<()>;
@@ -51,8 +55,29 @@ struct Cli {
 允许的 shell 类型：zsh, fish, bash, powershell, elvish"
     )]
     generator: Option<Shell>,
+    #[arg(long = "listall", value_enum, help = "显示全部歌曲")]
+    list_all: Option<ListAllType>,
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+enum ListAllType {
+    Song,
+    Season,
+}
+
+impl ValueEnum for ListAllType {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[ListAllType::Song, ListAllType::Season]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(match self {
+            ListAllType::Song => PossibleValue::new("song"),
+            ListAllType::Season => PossibleValue::new("season"),
+        })
+    }
 }
 
 #[derive(Subcommand)]
@@ -90,9 +115,6 @@ enum Commands {
     #[command(about = "显示播放列表")]
     List,
 
-    #[command(about = "显示全部歌曲", hide = true)]
-    ListAll,
-
     #[command(about = "启动 RoseSong")]
     Start,
 
@@ -102,8 +124,12 @@ enum Commands {
 
 #[derive(Parser)]
 struct PlayCommand {
+    #[arg(short = 'a', long = "all", action = clap::ArgAction::SetTrue, help = "播放全部歌曲")]
+    all: bool,
     #[arg(short = 'b', long = "bvid", help = "要播放的 bvid")]
     bvid: Option<String>,
+    #[arg(short = 's', long = "sid", help = "要播放的合集 ID")]
+    sid: Option<String>,
 }
 
 #[derive(Parser)]
@@ -152,18 +178,18 @@ struct FindCommand {
 struct DeleteCommand {
     #[arg(short = 'b', long = "bvid", help = "按 bvid 删除")]
     bvid: Option<String>,
-    // #[arg(short = 'c', long = "cid", help = "按 cid 删除")]
-    // cid: Option<String>,
     #[arg(short = 'o', long = "owner", help = "按作者删除")]
     owner: Option<String>,
     #[arg(short = 'a', long = "all", help = "删除所有曲目")]
     all: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 struct Track {
     bvid: String,
     cid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sid: Option<String>,
     title: String,
     owner: String,
 }
@@ -184,17 +210,30 @@ impl Track {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct Season {
+    id: String,
+    title: String,
+    cover: String,
+    intro: String,
+    owner: String,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Playlist {
     tracks: Vec<Track>,
+    seasons: Vec<Season>,
 }
 
 #[derive(Deserialize)]
 struct CurrentPlayInfo {
+    #[allow(dead_code)]
     index: usize,
     volume: usize,
     play_mode: PlayMode,
     track: Option<Track>,
+    playing_sid: Option<String>,
+    current_tracks: Vec<Track>,
 }
 
 #[derive(Deserialize, PartialEq)]
@@ -228,6 +267,11 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
         generate_completion(shell);
         return Ok(());
     }
+    if let Some(list_all_type) = cli.list_all {
+        handle_list_all(list_all_type).await?;
+        return Ok(());
+    }
+
     if let Some(cmd) = cli.command {
         match cmd {
             Commands::Play(play_cmd) => handle_play_command(play_cmd, &proxy).await,
@@ -247,7 +291,6 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
                 find_track(find_cmd.bvid, find_cmd.title, find_cmd.owner).await
             }
             Commands::List => display_playlist().await,
-            Commands::ListAll => list_all_tracks().await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
         }
@@ -264,6 +307,12 @@ async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -
     } else if let Some(bvid) = play_cmd.bvid {
         proxy.play_bvid(&bvid).await?;
         println!("播放指定 bvid");
+    } else if let Some(sid) = play_cmd.sid {
+        proxy.play_sid(&sid).await?;
+        println!("播放指定合集");
+    } else if play_cmd.all {
+        proxy.play_all().await?;
+        println!("播放全部歌曲");
     } else {
         proxy.play().await?;
         println!("继续播放");
@@ -428,7 +477,7 @@ async fn add_tracks(
 ) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    import_favorite_or_bvid_or_cid(fid, bvid, cid).await?;
+    import_favorite_or_bvid_or_sid(fid, bvid, cid).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     if old_content != new_content {
         if let Ok(is_running) = is_rosesong_running(proxy).await {
@@ -440,7 +489,7 @@ async fn add_tracks(
     Ok(())
 }
 
-async fn import_favorite_or_bvid_or_cid(
+async fn import_favorite_or_bvid_or_sid(
     fid: Option<String>,
     bvid: Option<String>,
     sid: Option<String>,
@@ -448,20 +497,29 @@ async fn import_favorite_or_bvid_or_cid(
     let client = reqwest::Client::new();
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     println!("正在获取相关信息");
-    let new_tracks = get_tracks(&client, fid, bvid, sid).await?;
+    let (new_tracks, new_season) = get_tracks(&client, fid, bvid, sid).await?;
 
     let mut tracks = Vec::new();
+    let mut seasons = Vec::new();
     if playlist_path.exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
         let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
         tracks.extend(playlist.tracks);
+        seasons.extend(playlist.seasons);
     }
 
+    // update tracks
     let new_tracks_bvid: Vec<String> = new_tracks.iter().map(|t| t.bvid.clone()).collect();
     tracks.retain(|t| !new_tracks_bvid.contains(&t.bvid));
     tracks.extend(new_tracks);
 
-    let playlist = Playlist { tracks };
+    // update seasons
+    if let Some(new_season) = new_season {
+        seasons.retain(|s| s.id != new_season.id);
+        seasons.push(new_season);
+    }
+
+    let playlist = Playlist { tracks, seasons };
     let toml_content = toml::to_string(&playlist)
         .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
     let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;
@@ -482,15 +540,12 @@ async fn delete_tracks(
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     perform_deletion(bvid, owner, all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    if old_content != new_content {
-        if let Ok(is_running) = is_rosesong_running(proxy).await {
-            if is_running {
-                if is_playlist_empty().await? {
-                    proxy.playlist_is_empty().await?;
-                } else {
-                    proxy.playlist_change().await?;
-                }
-            }
+    let is_running = is_rosesong_running(proxy).await?;
+    if old_content != new_content && is_running {
+        if is_playlist_empty().await? {
+            proxy.playlist_is_empty().await?;
+        } else {
+            proxy.playlist_change().await?;
         }
     }
     Ok(())
@@ -557,9 +612,18 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
         .await
         .expect("Failed to read line");
     if confirmation.trim().eq_ignore_ascii_case("y") {
+        // retain tracks
         playlist
             .tracks
             .retain(|track| !tracks_to_delete.contains(track));
+        // retain seasons
+        let exist_seasons = playlist
+            .tracks
+            .iter()
+            .filter_map(|t| t.sid.clone())
+            .collect::<HashSet<String>>();
+        playlist.seasons.retain(|s| exist_seasons.contains(&s.id));
+        // save to file
         let toml_content = toml::to_string(&playlist)
             .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
         let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;
@@ -622,15 +686,25 @@ async fn display_playlist() -> StdResult<()> {
     Ok(())
 }
 
-async fn list_all_tracks() -> StdResult<()> {
+async fn handle_list_all(list_all_type: ListAllType) -> StdResult<()> {
     let playlist_path = initialize_directories().await?.join("playlist.toml");
     if playlist_path.exists() {
         let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
         let playlist: Playlist = toml::from_str(&content)
             .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
-        let tracks = playlist.tracks;
-        for track in tracks {
-            println!("{},{} - {}", track.bvid, track.title, track.owner);
+        match list_all_type {
+            ListAllType::Song => {
+                let tracks = playlist.tracks;
+                for track in tracks {
+                    println!("{},{} - {}", track.bvid, track.title, track.owner);
+                }
+            }
+            ListAllType::Season => {
+                let seasons = playlist.seasons;
+                for season in seasons {
+                    println!("{},{}", season.id, season.title);
+                }
+            }
         }
     }
     Ok(())
@@ -678,6 +752,16 @@ async fn show_tracks_page(tracks: Vec<Track>) {
 }
 
 async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
+    // play list
+    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    let mut playlist = Playlist::default();
+    if playlist_path.exists() {
+        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
+        playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
+    }
+    let is_playlist_empty = is_playlist_empty().await?;
+
+    // current play info
     let current_file_path = format!(
         "{}/.config/rosesong/current.toml",
         std::env::var("HOME").expect("Failed to get HOME environment variable")
@@ -687,7 +771,13 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
         .map_err(App::Io)?;
     let current_play_info = toml::from_str::<CurrentPlayInfo>(&content)
         .map_err(|_| App::DataParsing("Failed to parse current.toml".to_string()))?;
+    let mut season = None;
+    if let Some(sid) = current_play_info.playing_sid.clone() {
+        let season_ = playlist.seasons.iter().find(|s| s.id == sid).cloned();
+        season = season_;
+    }
 
+    // show info
     println!("{}", "[rosesong 信息]".blue().bold().on_black());
     let is_running = is_rosesong_running(proxy).await?;
     let running_status = if is_running {
@@ -707,24 +797,43 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
         format!("{}%", current_play_info.volume).cyan()
     );
 
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    let mut playlist = Playlist::default();
-    if playlist_path.exists() {
-        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-        playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
-    }
-    let is_playlist_empty = is_playlist_empty().await?;
+    let play_status = {
+        if let Some(season) = &season {
+            let season_name = season.title.clone();
+            format!("仅播放合集：{season_name}").cyan()
+        } else {
+            "全部歌曲".cyan()
+        }
+    };
+    println!("播放列表状态：{play_status}");
+
+    let current_tracks_lenght = if is_playlist_empty {
+        "空".red()
+    } else {
+        format!(
+            "共 {} 首歌曲",
+            current_play_info.current_tracks.len().to_string().cyan()
+        )
+        .normal()
+    };
+    println!("当前播放歌曲列表：{current_tracks_lenght}");
+
     let playlist_status = if is_playlist_empty {
         "空".red()
     } else {
         format!("共 {} 首歌曲", playlist.tracks.len().to_string().cyan()).normal()
     };
-    println!("播放列表: {playlist_status}\n");
+    println!("歌曲列表: {playlist_status}\n");
 
+    if let Some(season) = season {
+        println!("{}", "[当前合集信息]".blue().bold().on_black());
+        println!("标题：{}", season.title.to_string().yellow());
+        println!("简介：{}", season.intro.to_string().yellow());
+        println!("up主：{}\n", season.owner.yellow());
+    }
     let track_info = current_play_info.track;
     if let Some(track) = track_info {
         println!("{}", "[当前歌曲信息]".blue().bold().on_black());
-        println!("索引：{}", current_play_info.index.to_string().yellow());
         println!("BV号：{}", track.bvid.to_string().yellow());
         println!("标题：{}", track.title.yellow());
         println!("up主：{}", track.owner.yellow());

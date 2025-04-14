@@ -15,11 +15,15 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task;
 
-use super::playlist::{get_current_track_index, CURRENT_PLAY_INFO};
+use super::playlist::{
+    get_current_track_index, get_play_mode, update_current_play_tracks, CURRENT_PLAY_INFO,
+};
 
 pub enum Command {
     Play,
     PlayBvid(String),
+    PlaySid(String),
+    PlayAll,
     Pause,
     Next,
     Previous,
@@ -192,7 +196,20 @@ impl Audio {
                                 error!("Failed to play track: {}", e);
                             }
                         }
-
+                        Command::PlaySid(new_sid) => {
+                            info!("Play {}", new_sid);
+                            if let Err(e) =
+                                handle_play_sid(&new_sid, &pipeline, &volume_ele, &client).await
+                            {
+                                error!("Failed to play season: {}", e);
+                            }
+                        }
+                        Command::PlayAll => {
+                            info!("Play all song");
+                            if let Err(e) = handle_play_all(&pipeline, &volume_ele, &client).await {
+                                error!("Failed to play all song: {}", e);
+                            }
+                        }
                         Command::Pause => {
                             info!("Pause");
                             if let Err(e) = pipeline.set_state(gstreamer::State::Paused) {
@@ -237,10 +254,7 @@ impl Audio {
                             }
                         }
                         Command::SetPlayMode(new_mode) => {
-                            let mut write_guard = play_mode.write().await;
-                            *write_guard = new_mode;
-                            let mut current_play_info = CURRENT_PLAY_INFO.write().await;
-                            if let Err(e) = current_play_info.set_play_mode(new_mode).await {
+                            if let Err(e) = handle_change_mode(play_mode.clone(), new_mode).await {
                                 error!("Failed to set play mode: {}", e);
                             }
                         }
@@ -272,18 +286,89 @@ async fn handle_play_bvid(
     client: &Client,
 ) -> Result<(), App> {
     let new_index = {
-        let playlist = PLAYLIST.read().await;
-        let playlist = playlist.as_ref().unwrap();
-        playlist.find_track_index(new_bvid)
+        let current_play_info = CURRENT_PLAY_INFO.read().await;
+        current_play_info.find_track_index(new_bvid)
     };
 
     if let Some(index) = new_index {
         set_current_track_index(index).await.ok();
     } else {
-        error!("Track with bvid {} not found in the playlist", new_bvid);
+        let all_tracks = {
+            let playlist = PLAYLIST.read().await;
+            let playlist = playlist.as_ref().unwrap();
+            playlist.tracks.clone()
+        };
+        let global_index = all_tracks.iter().position(|t| t.bvid == new_bvid);
+        if let Some(global_index) = global_index {
+            info!("当前播放合集中未找到歌曲，切换为播放全部歌曲");
+            update_current_play_tracks(None, all_tracks).await?;
+            set_current_track_index(global_index).await.ok();
+        } else {
+            error!("Track with bvid {} not found in the playlist", new_bvid);
+        }
     }
 
     play_track(pipeline, volume_ele, client).await
+}
+
+async fn handle_play_sid(
+    new_sid: &str,
+    pipeline: &Pipeline,
+    volume_ele: &gstreamer::Element,
+    client: &Client,
+) -> Result<(), App> {
+    let new_play_tracks = {
+        let playlist = PLAYLIST.read().await;
+        let playlist = playlist.as_ref().unwrap();
+        playlist.find_tracks_in_season(new_sid)
+    };
+
+    if new_play_tracks.is_empty() {
+        error!("Tracks with sid {} not found in the playlist", new_sid);
+    } else {
+        update_current_play_tracks(Some(new_sid.to_string()), new_play_tracks).await?;
+    }
+
+    play_track(pipeline, volume_ele, client).await
+}
+
+async fn handle_play_all(
+    pipeline: &Pipeline,
+    volume_ele: &gstreamer::Element,
+    client: &Client,
+) -> Result<(), App> {
+    let current_track = {
+        let current_play_info = CURRENT_PLAY_INFO.read().await;
+        current_play_info.get_current_track()
+    };
+    let new_play_tracks = {
+        let playlist = PLAYLIST.read().await;
+        let playlist = playlist.as_ref().unwrap();
+        playlist.tracks.clone()
+    };
+
+    if new_play_tracks.is_empty() {
+        error!("Tracks not found in the playlist");
+    } else {
+        update_current_play_tracks(None, new_play_tracks.clone()).await?;
+    }
+
+    if let Some(current_track) = current_track {
+        let bvid = current_track.bvid;
+        let new_index = new_play_tracks.iter().position(|t| t.bvid == bvid);
+        if let Some(index) = new_index {
+            set_current_track_index(index).await.ok();
+        } else {
+            error!(
+                "Track with bvid {} not found in the playlist, play next song",
+                bvid
+            );
+            play_track(pipeline, volume_ele, client).await?;
+        }
+    } else {
+        play_track(pipeline, volume_ele, client).await?;
+    }
+    Ok(())
 }
 
 async fn handle_next_track(
@@ -319,11 +404,8 @@ async fn handle_previous_track(
 }
 
 async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> Result<(), App> {
-    log::info!("----------------------> volume <-------------------------");
     let current_volume = volume_ele.property::<f64>("volume");
-    log::info!("Current volume before: {}", current_volume);
     let current_volume = (current_volume * 100.0).round() / 100.0;
-    log::info!("Current volume after: {}", current_volume);
     let new_volume = match vol.as_str() {
         "up" => {
             let vol = ((current_volume + 0.05) * 100.0).round() / 100.0;
@@ -349,9 +431,21 @@ async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> R
             }
         }
     };
-    log::info!("set new volume: {}", new_volume);
     volume_ele.set_property("volume", new_volume);
     CURRENT_PLAY_INFO.write().await.set_volume(new_volume).await
+}
+
+async fn handle_change_mode(
+    play_mode: Arc<RwLock<PlayMode>>,
+    new_mode: PlayMode,
+) -> Result<(), App> {
+    let mut write_guard = play_mode.write().await;
+    *write_guard = new_mode;
+    let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+    if let Err(e) = current_play_info.set_play_mode(new_mode).await {
+        error!("Failed to set play mode: {}", e);
+    }
+    Ok(())
 }
 
 async fn handle_reload_playlist(
@@ -364,15 +458,14 @@ async fn handle_reload_playlist(
 
     load().await?;
 
-    let playlist = {
-        let playlist_ = PLAYLIST.read().await;
-        playlist_.clone().unwrap_or_default()
+    let tracks = {
+        let current_play_info = CURRENT_PLAY_INFO.read().await;
+        current_play_info.current_tracks.clone()
     };
 
     let should_play = {
         if let Ok(current_track) = current_track {
-            // 这个 if 条件应该是多余的，因为在添加歌曲过程中，已经合并同 bvid 的歌曲信息了，只保留其中一个
-            if let Some(new_index) = playlist.find_track_index(&current_track.bvid) {
+            if let Some(new_index) = tracks.iter().position(|t| t.bvid == current_track.bvid) {
                 set_current_track_index(new_index).await.ok();
                 info!(
                     "Current track found in the new playlist, index set to {}",
@@ -381,7 +474,7 @@ async fn handle_reload_playlist(
                 false
             } else {
                 info!("Current track not found in the new playlist, resetting playback");
-                let track_count = playlist.tracks.len();
+                let track_count = tracks.len();
                 let new_index = if current_index < track_count {
                     current_index
                 } else {
@@ -396,7 +489,7 @@ async fn handle_reload_playlist(
     };
 
     if should_play {
-        play_track(&pipeline, &volume_ele, &client).await?;
+        play_track(pipeline, volume_ele, client).await?;
     }
 
     Ok(())
@@ -433,7 +526,7 @@ async fn play_track(
         .map_err(|_| App::State("Failed to set pipeline to Ready".to_string()))?;
 
     let mut retries = 5;
-    let play_mode = CURRENT_PLAY_INFO.read().await.play_mode;
+    let play_mode = get_play_mode().await?;
     loop {
         if retries == 0 {
             return Err(App::Fetch(

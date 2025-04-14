@@ -29,6 +29,16 @@ impl PlayerDBus {
         Ok(())
     }
 
+    async fn play_sid(&self, sid: String) -> fdo::Result<()> {
+        self.tx.send(Command::PlaySid(sid)).await.unwrap();
+        Ok(())
+    }
+
+    async fn play_all(&self) -> fdo::Result<()> {
+        self.tx.send(Command::PlayAll).await.unwrap();
+        Ok(())
+    }
+
     async fn pause(&self) -> fdo::Result<()> {
         self.tx.send(Command::Pause).await.unwrap();
         Ok(())

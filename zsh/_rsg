@@ -33,6 +33,8 @@ _rsg() {
             _arguments "${_arguments_options[@]}" : \
             '-b+[要播放的 bvid]:BVID:_rsg_bvids' \
             '--bvid=[要播放的 bvid]:BVID:_rsg_bvids' \
+            '-s+[要播放的合集 ID]:SID:_rsg_seasons' \
+            '--sid=[要播放的合集 ID]:SID:_rsg_seasons' \
             '-h[Print help]' \
             '--help[Print help]' \
             && ret=0
@@ -127,12 +129,6 @@ _rsg() {
             '--help[Print help]' \
             && ret=0
         ;;
-        (list-all)
-            _arguments "${_arguments_options[@]}" : \
-            '-h[Print help]' \
-            '--help[Print help]' \
-            && ret=0
-        ;;
         (start)
             _arguments "${_arguments_options[@]}" : \
             '-h[Print help]' \
@@ -201,10 +197,6 @@ _rsg() {
                     _arguments "${_arguments_options[@]}" : \
                     && ret=0
                 ;;
-                (list-all)
-                    _arguments "${_arguments_options[@]}" : \
-                    && ret=0
-                ;;
                 (start)
                     _arguments "${_arguments_options[@]}" : \
                     && ret=0
@@ -240,7 +232,6 @@ _rsg_commands() {
 'find:在播放列表中查找歌曲' \
 'delete:从播放列表中删除歌曲' \
 'list:显示播放列表' \
-'list-all:显示全部歌曲' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -276,7 +267,6 @@ _rsg__help_commands() {
 'find:在播放列表中查找歌曲' \
 'delete:从播放列表中删除歌曲' \
 'list:显示播放列表' \
-'list-all:显示全部歌曲' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -307,11 +297,6 @@ _rsg__help__help_commands() {
 _rsg__help__list_commands() {
     local commands; commands=()
     _describe -t commands 'rsg help list commands' commands "$@"
-}
-(( $+functions[_rsg__help__list-all_commands] )) ||
-_rsg__help__list-all_commands() {
-    local commands; commands=()
-    _describe -t commands 'rsg help list-all commands' commands "$@"
 }
 (( $+functions[_rsg__help__mode_commands] )) ||
 _rsg__help__mode_commands() {
@@ -363,11 +348,6 @@ _rsg__list_commands() {
     local commands; commands=()
     _describe -t commands 'rsg list commands' commands "$@"
 }
-(( $+functions[_rsg__list-all_commands] )) ||
-_rsg__list-all_commands() {
-    local commands; commands=()
-    _describe -t commands 'rsg list-all commands' commands "$@"
-}
 (( $+functions[_rsg__mode_commands] )) ||
 _rsg__mode_commands() {
     local commands; commands=()
@@ -414,12 +394,20 @@ _rsg__vol_commands() {
     _describe -t commands 'rsg vol commands' commands "$@"
 }
 
-# 通过 `rsg list-all` 获取 BVID 并进行动态补全
+# 通过 `rsg --listall song` 获取 BVID 并进行动态补全
 (( $+functions[_rsg_bvids] )) ||
 _rsg_bvids() {
     local -a songs
-    songs=("${(@f)$(rsg list-all | awk -F ',' '{print $1":"$2}')}")
+    songs=("${(@f)$(rsg --listall song | awk -F ',' '{print $1":"$2}')}")
     _describe -t bvids 'BVIDs' songs
+}
+
+# 通过 `rsg --listall season` 获取合集 ID 并进行动态补全
+(( $+functions[_rsg_seasons] )) ||
+_rsg_seasons() {
+    local -a seasons
+    seasons=("${(@f)$(rsg --listall season | awk -F ',' '{print $1":"$2}')}")
+    _describe -t seasons 'Season IDs' seasons
 }
 
 if [ "$funcstack[1]" = "_rsg" ]; then

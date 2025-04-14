@@ -1,4 +1,4 @@
-name: Build RoseSong
+name: Alpha
 
 on:
   push:

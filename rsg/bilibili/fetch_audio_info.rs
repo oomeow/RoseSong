@@ -1,6 +1,6 @@
 use std::{io::Write, sync::mpsc};
 
-use crate::{error::App, Track};
+use crate::{error::App, Season, Track};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
@@ -23,11 +23,16 @@ pub struct VideoData {
 
 #[derive(Deserialize)]
 pub struct UgcSeason {
+    pub id: i64,
+    pub title: String,
+    pub cover: String,
+    pub intro: String,
     pub sections: Vec<Section>,
 }
 
 #[derive(Deserialize)]
 pub struct Section {
+    pub season_id: i64,
     pub episodes: Vec<Episode>,
 }
 
@@ -39,6 +44,16 @@ pub struct Episode {
 }
 
 impl VideoData {
+    pub fn to_season(&self) -> Option<Season> {
+        self.ugc_season.as_ref().map(|ugc_season| Season {
+            id: ugc_season.id.to_string(),
+            title: ugc_season.title.clone(),
+            cover: ugc_season.cover.clone(),
+            intro: ugc_season.intro.clone(),
+            owner: self.owner.name.clone(),
+        })
+    }
+
     pub fn to_tracks_by_season(&self) -> Vec<Track> {
         let mut tracks = Vec::new();
         if let Some(ugc_season) = &self.ugc_season {
@@ -47,6 +62,7 @@ impl VideoData {
                     tracks.push(Track {
                         bvid: episode.bvid.clone(),
                         cid: episode.cid.to_string(),
+                        sid: Some(section.season_id.to_string()),
                         title: episode.title.clone(),
                         owner: self.owner.name.clone(),
                     });
@@ -60,6 +76,7 @@ impl VideoData {
         Track {
             bvid: self.bvid.clone(),
             cid: self.cid.to_string(),
+            sid: None,
             title: self.title.clone(),
             owner: self.owner.name.clone(),
         }
@@ -165,8 +182,9 @@ pub async fn get_tracks(
     fid: Option<String>,
     bvid: Option<String>,
     sid: Option<String>,
-) -> Result<Vec<Track>, App> {
+) -> Result<(Vec<Track>, Option<Season>), App> {
     let mut track_list = Vec::new();
+    let mut season = None;
 
     if let Some(fid) = fid {
         let bvids = fetch_bvids_from_fid(client, &fid).await?;
@@ -174,7 +192,14 @@ pub async fn get_tracks(
     } else if let Some(bvid) = bvid {
         let video_data = fetch_video_data(client, &bvid).await?;
         if video_data.season_id.is_some() {
-            print!("该歌曲位于合集中，是否导入该合集? [y/n]: ");
+            print!(
+                "该歌曲位于合集 [{}] 中，是否导入该合集? [y/n]: ",
+                video_data
+                    .ugc_season
+                    .as_ref()
+                    .map(|i| i.title.clone())
+                    .unwrap_or_default()
+            );
             std::io::stdout().flush().unwrap();
             let mut confirmation = String::new();
             let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
@@ -187,6 +212,7 @@ pub async fn get_tracks(
             } else {
                 track_list.push(video_data.to_track());
             }
+            season = video_data.to_season();
         } else {
             track_list.push(video_data.to_track());
         }
@@ -194,6 +220,7 @@ pub async fn get_tracks(
         let bvids = fetch_bvids_from_session_id(client, &season_id).await?;
         let video_data = fetch_video_data(client, &bvids[0]).await?;
         track_list.extend(video_data.to_tracks_by_season());
+        season = video_data.to_season();
     } else {
         return Err(App::InvalidInput(
             "请提供正确的 fid 或 bvid 或 sid".to_string(),
@@ -206,7 +233,7 @@ pub async fn get_tracks(
         ));
     }
 
-    Ok(track_list)
+    Ok((track_list, season))
 }
 
 fn batch_fetch_audio_info(
