@@ -799,34 +799,33 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
 
     let play_status = {
         if let Some(season) = &season {
-            let season_name = season.title.clone();
-            format!("仅播放合集：{season_name}").cyan()
+            let season_name = season.title.clone().yellow();
+            format!("仅播放合集 [{season_name}]").cyan()
         } else {
             "全部歌曲".cyan()
         }
     };
     println!("播放列表状态：{play_status}");
 
-    let current_tracks_lenght = if is_playlist_empty {
-        "空".red()
-    } else {
-        format!(
-            "共 {} 首歌曲",
-            current_play_info.current_tracks.len().to_string().cyan()
-        )
-        .normal()
-    };
-    println!("当前播放歌曲列表：{current_tracks_lenght}");
-
     let playlist_status = if is_playlist_empty {
         "空".red()
     } else {
-        format!("共 {} 首歌曲", playlist.tracks.len().to_string().cyan()).normal()
+        format!("共 {} 首", playlist.tracks.len().to_string().cyan()).normal()
     };
-    println!("歌曲列表: {playlist_status}\n");
+    println!("全部歌曲: {playlist_status}\n");
 
     if let Some(season) = season {
+        let current_tracks_lenght = if is_playlist_empty {
+            "空".red()
+        } else {
+            format!(
+                "共 {} 首歌曲",
+                current_play_info.current_tracks.len().to_string().yellow()
+            )
+            .normal()
+        };
         println!("{}", "[当前合集信息]".blue().bold().on_black());
+        println!("全部歌曲：{current_tracks_lenght}");
         println!("标题：{}", season.title.to_string().yellow());
         println!("简介：{}", season.intro.to_string().yellow());
         println!("up主：{}\n", season.owner.yellow());
@@ -834,6 +833,10 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     let track_info = current_play_info.track;
     if let Some(track) = track_info {
         println!("{}", "[当前歌曲信息]".blue().bold().on_black());
+        println!(
+            "当前播放列表索引：{}",
+            current_play_info.index.to_string().yellow()
+        );
         println!("BV号：{}", track.bvid.to_string().yellow());
         println!("标题：{}", track.title.yellow());
         println!("up主：{}", track.owner.yellow());
