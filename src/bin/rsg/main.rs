@@ -181,6 +181,8 @@ struct FindCommand {
 struct DeleteCommand {
     #[arg(short = 'b', long = "bvid", help = "按 bvid 删除")]
     bvid: Option<String>,
+    #[arg(short = 's', long = "sid", help = "按合集 ID 删除")]
+    sid: Option<String>,
     #[arg(short = 'o', long = "owner", help = "按作者删除")]
     owner: Option<String>,
     #[arg(short = 'a', long = "all", help = "删除所有曲目")]
@@ -215,15 +217,9 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Stop => handle_stop_command(&proxy).await,
             Commands::Vol(vol_cmd) => handle_volume_command(vol_cmd, &proxy).await,
             Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
-            Commands::Add(add_cmd) => {
-                handle_add_command(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
-            }
-            Commands::Delete(delete_cmd) => {
-                delete_tracks(delete_cmd.bvid, delete_cmd.owner, delete_cmd.all, &proxy).await
-            }
-            Commands::Find(find_cmd) => {
-                find_track(find_cmd.bvid, find_cmd.title, find_cmd.owner).await
-            }
+            Commands::Add(add_cmd) => handle_add_command(add_cmd, &proxy).await,
+            Commands::Delete(del_cmd) => handle_delete_command(del_cmd, &proxy).await,
+            Commands::Find(find_cmd) => handle_find_comand(find_cmd).await,
             Commands::List => display_playlist().await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
@@ -379,15 +375,10 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     Ok(())
 }
 
-async fn handle_add_command(
-    fid: Option<String>,
-    bvid: Option<String>,
-    sid: Option<String>,
-    proxy: &MyPlayerProxy<'_>,
-) -> StdResult<()> {
+async fn handle_add_command(add_cmd: AddCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     let playlist_path = playlist_file()?;
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    import_favorite_or_bvid_or_sid(fid, bvid, sid).await?;
+    import_favorite_or_bvid_or_sid(add_cmd.fid, add_cmd.bvid, add_cmd.sid).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     let is_running = is_rosesong_running(proxy).await?;
     if is_running && old_content != new_content {
@@ -428,19 +419,14 @@ async fn import_favorite_or_bvid_or_sid(
     Ok(())
 }
 
-async fn delete_tracks(
-    bvid: Option<String>,
-    owner: Option<String>,
-    all: bool,
-    proxy: &MyPlayerProxy<'_>,
-) -> StdResult<()> {
+async fn handle_delete_command(del_cmd: DeleteCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     let playlist_path = playlist_file()?;
     if !playlist_path.exists() {
         println!("{}", "歌曲列表文件不存在".red());
         return Ok(());
     }
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    perform_deletion(bvid, owner, all).await?;
+    perform_deletion(del_cmd.bvid, del_cmd.sid, del_cmd.owner, del_cmd.all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     let is_running = is_rosesong_running(proxy).await?;
     if is_running && old_content != new_content {
@@ -453,7 +439,12 @@ async fn delete_tracks(
     Ok(())
 }
 
-async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool) -> StdResult<()> {
+async fn perform_deletion(
+    bvid: Option<String>,
+    sid: Option<String>,
+    owner: Option<String>,
+    all: bool,
+) -> StdResult<()> {
     if all {
         print!("即将清空播放列表，是否确认删除所有歌曲？[y/n]: ");
         std::io::stdout().flush().unwrap();
@@ -471,8 +462,11 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
         }
         return Ok(());
     }
+
     let mut playlist = get_playlist().await.unwrap_or_default();
     let mut tracks_to_delete: Vec<Track> = Vec::new();
+
+    // bvid
     if let Some(bvid) = bvid {
         tracks_to_delete.extend(
             playlist
@@ -482,6 +476,17 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
                 .cloned(),
         );
     }
+    // sid
+    if sid.is_some() {
+        tracks_to_delete.extend(
+            playlist
+                .tracks
+                .iter()
+                .filter(|track| track.sid == sid)
+                .cloned(),
+        );
+    }
+    // owner
     if let Some(owner) = owner {
         tracks_to_delete.extend(
             playlist
@@ -491,6 +496,7 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
                 .cloned(),
         );
     }
+
     if tracks_to_delete.is_empty() {
         println!("{}", "没有找到符合条件的track".black());
         return Ok(());
@@ -527,21 +533,17 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
     Ok(())
 }
 
-async fn find_track(
-    bvid: Option<String>,
-    title: Option<String>,
-    owner: Option<String>,
-) -> StdResult<()> {
+async fn handle_find_comand(find_cmd: FindCommand) -> StdResult<()> {
     let playlist = get_playlist().await;
     if let Some(playlist) = playlist {
         let mut results = playlist.tracks;
-        if let Some(bvid) = bvid {
+        if let Some(bvid) = find_cmd.bvid {
             results.retain(|track| track.bvid == bvid);
         }
-        if let Some(title) = title {
+        if let Some(title) = find_cmd.title {
             results.retain(|track| track.title.contains(&title));
         }
-        if let Some(owner) = owner {
+        if let Some(owner) = find_cmd.owner {
             results.retain(|track| track.owner.contains(&owner));
         }
         if results.is_empty() {
@@ -568,30 +570,6 @@ async fn display_playlist() -> StdResult<()> {
     if let Some(playlist) = get_playlist().await {
         let tracks = playlist.tracks;
         show_tracks_page(tracks).await;
-    }
-    Ok(())
-}
-
-async fn handle_list_all(list_all_type: ListAllType) -> StdResult<()> {
-    let is_empty = is_playlist_empty().await?;
-    if is_empty {
-        return Ok(());
-    }
-    if let Some(playlist) = get_playlist().await {
-        match list_all_type {
-            ListAllType::Song => {
-                let tracks = playlist.tracks;
-                for track in tracks {
-                    println!("{},{} - {}", track.bvid, track.title, track.owner);
-                }
-            }
-            ListAllType::Season => {
-                let seasons = playlist.seasons;
-                for season in seasons {
-                    println!("{},{}", season.id, season.title);
-                }
-            }
-        }
     }
     Ok(())
 }
@@ -697,6 +675,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
             .normal()
         };
         println!("{}", "[当前合集信息]".blue().bold().on_black());
+        println!("ID：{}", season.id.to_string().yellow());
         println!("全部歌曲：{current_tracks_lenght}");
         println!("标题：{}", season.title.to_string().yellow());
         println!("简介：{}", season.intro.to_string().yellow());
@@ -720,4 +699,33 @@ fn generate_completion(shell: Shell) {
     let mut cmd = Cli::command();
     let bin_name = cmd.get_name().to_string();
     generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+}
+
+async fn handle_list_all(list_all_type: ListAllType) -> StdResult<()> {
+    let is_empty = is_playlist_empty().await?;
+    if is_empty {
+        return Ok(());
+    }
+    if let Some(playlist) = get_playlist().await {
+        match list_all_type {
+            ListAllType::Song => {
+                let tracks = playlist.tracks;
+                for track in tracks {
+                    println!("{},{} - {}", track.bvid, track.title, track.owner);
+                }
+            }
+            ListAllType::Season => {
+                let seasons = playlist.seasons;
+                for season in seasons {
+                    let total = playlist
+                        .tracks
+                        .iter()
+                        .filter(|t| t.sid == Some(season.id.clone()))
+                        .count();
+                    println!("{},{}  [共{}首]", season.id, season.title, total);
+                }
+            }
+        }
+    }
+    Ok(())
 }

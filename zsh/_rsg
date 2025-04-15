@@ -115,6 +115,8 @@ _rsg() {
             _arguments "${_arguments_options[@]}" : \
             '-b+[按 bvid 删除]:BVID:_rsg_bvids' \
             '--bvid=[按 bvid 删除]:BVID:_rsg_bvids' \
+            '-s+[按合集 ID 删除]:SID:_rsg_seasons' \
+            '--sid=[按合集 ID 删除]:SID:_rsg_seasons' \
             '-o+[按作者删除]:OWNER:_default' \
             '--owner=[按作者删除]:OWNER:_default' \
             '-a[删除所有曲目]' \
