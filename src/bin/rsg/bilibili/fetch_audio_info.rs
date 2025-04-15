@@ -1,8 +1,11 @@
 use std::{io::Write, sync::mpsc};
 
-use crate::{error::App, Season, Track};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
+use rosesong::{
+    error::AppError,
+    model::{Season, Track},
+};
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 
@@ -102,42 +105,42 @@ pub fn create_progress_bar(total: u64) -> ProgressBar {
 }
 
 // 可通过该方法获取合集里的所有视频信息 (ugc_season -> sections -> episodes(合集里的所有视频数组对象))
-pub async fn fetch_video_data(client: &Client, bvid: &str) -> Result<VideoData, App> {
+pub async fn fetch_video_data(client: &Client, bvid: &str) -> Result<VideoData, AppError> {
     let url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
     let response = client.get(&url).send().await.map_err(|e| {
         eprintln!("Failed to send request to {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     let mut api_response: ApiResponse<VideoData> = response.json().await.map_err(|e| {
         eprintln!("Failed to parse response from {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     api_response.data.bvid = bvid.to_string();
     Ok(api_response.data)
 }
 
-pub async fn fetch_bvids_from_fid(client: &Client, fid: &str) -> Result<Vec<String>, App> {
+pub async fn fetch_bvids_from_fid(client: &Client, fid: &str) -> Result<Vec<String>, AppError> {
     let url = format!("https://api.bilibili.com/x/v3/fav/resource/ids?media_id={fid}");
     let response = client.get(&url).send().await.map_err(|e| {
         eprintln!("Failed to send request to {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     let json: serde_json::Value = response.json().await.map_err(|e| {
         eprintln!("Failed to parse response from {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     let bvids: Vec<String> = json["data"]
         .as_array()
         .ok_or_else(|| {
             eprintln!("Failed to find 'data' array in response from {url}");
-            App::DataParsing("数据中缺少 bvids 数组".to_string())
+            AppError::DataParsing("数据中缺少 bvids 数组".to_string())
         })?
         .iter()
         .filter_map(|v| v["bvid"].as_str().map(String::from))
         .collect();
 
     if bvids.is_empty() {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "提供的 fid 无效或没有找到相关的视频".to_string(),
         ));
     }
@@ -148,28 +151,28 @@ pub async fn fetch_bvids_from_fid(client: &Client, fid: &str) -> Result<Vec<Stri
 pub async fn fetch_bvids_from_session_id(
     client: &Client,
     season_id: &str,
-) -> Result<Vec<String>, App> {
+) -> Result<Vec<String>, AppError> {
     let url = format!("https://api.bilibili.com/x/space/fav/season/list?season_id={season_id}");
     let response = client.get(&url).send().await.map_err(|e| {
         eprintln!("Failed to send request to {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     let json: serde_json::Value = response.json().await.map_err(|e| {
         eprintln!("Failed to parse response from {url}: {e}");
-        App::HttpRequest(e)
+        AppError::HttpRequest(e)
     })?;
     let bvids: Vec<String> = json["data"]["medias"]
         .as_array()
         .ok_or_else(|| {
             eprintln!("Failed to find 'data' array in response from {url}");
-            App::DataParsing("数据中缺少 bvids 数组".to_string())
+            AppError::DataParsing("数据中缺少 bvids 数组".to_string())
         })?
         .iter()
         .filter_map(|v| v["bvid"].as_str().map(String::from))
         .collect();
 
     if bvids.is_empty() {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "提供的 fid 无效或没有找到相关的视频".to_string(),
         ));
     }
@@ -182,7 +185,7 @@ pub async fn get_tracks(
     fid: Option<String>,
     bvid: Option<String>,
     sid: Option<String>,
-) -> Result<(Vec<Track>, Option<Season>), App> {
+) -> Result<(Vec<Track>, Option<Season>), AppError> {
     let mut track_list = Vec::new();
     let mut season = None;
 
@@ -222,13 +225,13 @@ pub async fn get_tracks(
         track_list.extend(video_data.to_tracks_by_season());
         season = video_data.to_season();
     } else {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "请提供正确的 fid 或 bvid 或 sid".to_string(),
         ));
     }
 
     if track_list.is_empty() {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "提供的 bvid 或 fid 或 sid 无效或没有找到相关的视频".to_string(),
         ));
     }
@@ -240,7 +243,7 @@ fn batch_fetch_audio_info(
     client: &Client,
     track_list: &mut Vec<Track>,
     bvids: &[String],
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     let (send, recv) = mpsc::channel();
     let m = MultiProgress::new();
     let batch_bvids = bvids
@@ -270,7 +273,7 @@ fn batch_fetch_audio_info(
     }
 
     if track_list.is_empty() {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "提供的 bvid 无效或没有找到相关的视频".to_string(),
         ));
     }

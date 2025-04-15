@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use log::info;
+use rosesong::model::PlayMode;
 use tokio::sync::{mpsc, watch, Mutex};
 use zbus::{fdo, interface, ConnectionBuilder};
 
-use crate::player::playlist::PlayMode;
-use crate::player::Command;
+use crate::player::{playlist::update_current_play_tracks, Command};
 
 #[derive(Clone)]
 pub struct PlayerDBus {
@@ -66,13 +66,10 @@ impl PlayerDBus {
     }
 
     async fn set_mode(&self, mode: String) -> fdo::Result<()> {
-        let mode = match mode.as_str() {
-            "Loop" => PlayMode::Loop,
-            "Shuffle" => PlayMode::Shuffle,
-            "Repeat" => PlayMode::Repeat,
-            _ => return Err(fdo::Error::Failed("Invalid mode".into())),
-        };
-        self.tx.send(Command::SetPlayMode(mode)).await.unwrap();
+        self.tx
+            .send(Command::SetPlayMode(PlayMode::from(mode)))
+            .await
+            .unwrap();
         Ok(())
     }
 
@@ -91,6 +88,7 @@ impl PlayerDBus {
         self.tx.send(Command::Stop).await.unwrap();
         let mut playlist_empty = self.playlist_empty.lock().await;
         *playlist_empty = true;
+        update_current_play_tracks(None, Vec::new()).await.unwrap();
         Ok(())
     }
 }

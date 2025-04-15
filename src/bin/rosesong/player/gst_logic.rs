@@ -1,8 +1,7 @@
-use crate::error::App;
 use crate::player::network::{fetch_and_verify_audio_url, set_pipeline_uri_with_headers};
 use crate::player::playlist::{
     get_current_track, load, move_to_next_track, move_to_previous_track, set_current_track_index,
-    PlayMode, PLAYLIST,
+    PLAYLIST,
 };
 use futures_util::stream::StreamExt;
 use gstreamer::prelude::*;
@@ -10,14 +9,14 @@ use gstreamer::MessageView;
 use gstreamer::Pipeline;
 use log::{error, info};
 use reqwest::{Client, ClientBuilder};
+use rosesong::error::AppError;
+use rosesong::model::PlayMode;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task;
 
-use super::playlist::{
-    get_current_track_index, get_play_mode, update_current_play_tracks, CURRENT_PLAY_INFO,
-};
+use super::playlist::{update_current_play_tracks, CURRENT_PLAY_INFO};
 
 pub enum Command {
     Play,
@@ -48,14 +47,14 @@ impl Audio {
     pub fn new(
         play_mode: PlayMode,
         command_receiver: Arc<Mutex<mpsc::Receiver<Command>>>,
-    ) -> Result<Self, App> {
-        gstreamer::init().map_err(|e| App::Init(e.to_string()))?;
+    ) -> Result<Self, AppError> {
+        gstreamer::init().map_err(|e| AppError::Init(e.to_string()))?;
         let pipeline = Arc::new(gstreamer::Pipeline::new());
         let volume_ele = Arc::new(
             gstreamer::ElementFactory::make("volume")
                 .property("volume", 0.0)
                 .build()
-                .map_err(|_| App::Element("Failed to create volume Element".to_string()))?,
+                .map_err(|_| AppError::Element("Failed to create volume Element".to_string()))?,
         );
         let client = Arc::new(
             ClientBuilder::new()
@@ -86,19 +85,15 @@ impl Audio {
     ) {
         let pipeline = Arc::clone(&self.pipeline);
         let client = Arc::clone(&self.client);
-        let play_mode = Arc::clone(&self.play_mode);
 
         let volume_ele_ = volume_ele.clone();
         task::spawn(async move {
             while let Some(()) = eos_receiver.recv().await {
                 info!("Track finished playing. Handling EOS...");
 
-                let current_play_mode = *play_mode.read().await;
-                if current_play_mode != PlayMode::Repeat {
-                    if let Err(e) = move_to_next_track(current_play_mode).await {
-                        error!("Error moving to next track: {}", e);
-                        continue;
-                    }
+                if let Err(e) = move_to_next_track().await {
+                    error!("Error moving to next track: {}", e);
+                    continue;
                 }
 
                 if let Err(e) = play_track(&pipeline, &volume_ele_, &client).await {
@@ -118,7 +113,7 @@ impl Audio {
         }
     }
 
-    pub async fn play_playlist(&self) -> Result<(), App> {
+    pub async fn play_playlist(&self) -> Result<(), AppError> {
         let pipeline = Arc::clone(&self.pipeline);
         let volume_ele = Arc::clone(&self.volume_ele);
         let client = Arc::clone(&self.client);
@@ -140,11 +135,11 @@ impl Audio {
         Ok(())
     }
 
-    fn listen_to_bus(&self, eos_sender: &mpsc::Sender<()>) -> Result<(), App> {
+    fn listen_to_bus(&self, eos_sender: &mpsc::Sender<()>) -> Result<(), AppError> {
         let bus = self
             .pipeline
             .bus()
-            .ok_or_else(|| App::Pipeline("Failed to get GStreamer bus".to_string()))?;
+            .ok_or_else(|| AppError::Pipeline("Failed to get GStreamer bus".to_string()))?;
 
         task::spawn({
             let eos_sender = eos_sender.clone();
@@ -159,6 +154,10 @@ impl Audio {
                             }
                         }
                         MessageView::Error(err) => {
+                            let mut current_play_info = CURRENT_PLAY_INFO.write().await;
+                            if current_play_info.move_to_next_track().await.is_err() {
+                                error!("Failed to play next song");
+                            }
                             error!("Error from GStreamer pipeline: {}", err);
                         }
                         _ => (),
@@ -218,26 +217,15 @@ impl Audio {
                         }
                         Command::Next => {
                             info!("Play next song");
-                            if let Err(e) = handle_next_track(
-                                play_mode.clone(),
-                                &pipeline,
-                                &volume_ele,
-                                &client,
-                            )
-                            .await
+                            if let Err(e) = handle_next_track(&pipeline, &volume_ele, &client).await
                             {
                                 error!("Failed to play next track: {}", e);
                             }
                         }
                         Command::Previous => {
                             info!("Play previous song");
-                            if let Err(e) = handle_previous_track(
-                                play_mode.clone(),
-                                &pipeline,
-                                &volume_ele,
-                                &client,
-                            )
-                            .await
+                            if let Err(e) =
+                                handle_previous_track(&pipeline, &volume_ele, &client).await
                             {
                                 error!("Failed to play previous track: {}", e);
                             }
@@ -284,7 +272,7 @@ async fn handle_play_bvid(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     let new_index = {
         let current_play_info = CURRENT_PLAY_INFO.read().await;
         current_play_info.find_track_index(new_bvid)
@@ -316,7 +304,7 @@ async fn handle_play_sid(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     let new_play_tracks = {
         let playlist = PLAYLIST.read().await;
         let playlist = playlist.as_ref().unwrap();
@@ -336,7 +324,7 @@ async fn handle_play_all(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     let current_track = {
         let current_play_info = CURRENT_PLAY_INFO.read().await;
         current_play_info.get_current_track()
@@ -372,38 +360,27 @@ async fn handle_play_all(
 }
 
 async fn handle_next_track(
-    play_mode: Arc<RwLock<PlayMode>>,
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
-    let current_play_mode = *play_mode.read().await;
-    let mode = if current_play_mode == PlayMode::Repeat {
-        PlayMode::Loop
-    } else {
-        current_play_mode
-    };
-    move_to_next_track(mode).await?;
+) -> Result<(), AppError> {
+    move_to_next_track().await?;
     play_track(pipeline, volume_ele, client).await
 }
 
 async fn handle_previous_track(
-    play_mode: Arc<RwLock<PlayMode>>,
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
-    let current_play_mode = *play_mode.read().await;
-    let mode = if current_play_mode == PlayMode::Repeat {
-        PlayMode::Loop
-    } else {
-        current_play_mode
-    };
-    move_to_previous_track(mode).await?;
+) -> Result<(), AppError> {
+    move_to_previous_track().await?;
     play_track(pipeline, volume_ele, client).await
 }
 
-async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> Result<(), App> {
+async fn handle_volume_change(
+    volume_ele: &gstreamer::Element,
+    vol: String,
+) -> Result<(), AppError> {
     let current_volume = volume_ele.property::<f64>("volume");
     let current_volume = (current_volume * 100.0).round() / 100.0;
     let new_volume = match vol.as_str() {
@@ -438,7 +415,7 @@ async fn handle_volume_change(volume_ele: &gstreamer::Element, vol: String) -> R
 async fn handle_change_mode(
     play_mode: Arc<RwLock<PlayMode>>,
     new_mode: PlayMode,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     let mut write_guard = play_mode.write().await;
     *write_guard = new_mode;
     let mut current_play_info = CURRENT_PLAY_INFO.write().await;
@@ -452,46 +429,34 @@ async fn handle_reload_playlist(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
-    let current_index = get_current_track_index().await;
+) -> Result<(), AppError> {
     let current_track = get_current_track().await;
-
     load().await?;
-
     let tracks = {
         let current_play_info = CURRENT_PLAY_INFO.read().await;
         current_play_info.current_tracks.clone()
     };
 
-    let should_play = {
-        if let Ok(current_track) = current_track {
-            if let Some(new_index) = tracks.iter().position(|t| t.bvid == current_track.bvid) {
-                set_current_track_index(new_index).await.ok();
-                info!(
-                    "Current track found in the new playlist, index set to {}",
-                    new_index
-                );
-                false
-            } else {
-                info!("Current track not found in the new playlist, resetting playback");
-                let track_count = tracks.len();
-                let new_index = if current_index < track_count {
-                    current_index
-                } else {
-                    track_count - 1
-                };
-                set_current_track_index(new_index).await.ok();
-                true
-            }
-        } else {
-            false
+    if tracks.is_empty() {
+        // pause playback
+        if let Err(e) = pipeline.set_state(gstreamer::State::Null) {
+            error!("Failed to stop: {}", e);
         }
-    };
-
-    if should_play {
-        play_track(pipeline, volume_ele, client).await?;
+        return Ok(());
     }
 
+    if let Ok(current_track) = current_track {
+        if let Some(new_index) = tracks.iter().position(|t| t.bvid == current_track.bvid) {
+            set_current_track_index(new_index).await.ok();
+            info!(
+                "Current track found in the new playlist, index set to {}",
+                new_index
+            );
+        } else {
+            info!("Current track not found in the new playlist, resetting play");
+            play_track(pipeline, volume_ele, client).await?;
+        }
+    }
     Ok(())
 }
 
@@ -499,7 +464,7 @@ async fn handle_playlist_is_empty(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     load().await?;
     info!("Set track");
     set_current_track_index(0).await.ok();
@@ -510,26 +475,26 @@ async fn play_track(
     pipeline: &Pipeline,
     volume_ele: &gstreamer::Element,
     client: &Client,
-) -> Result<(), App> {
+) -> Result<(), AppError> {
     pipeline
         .set_state(gstreamer::State::Null)
-        .map_err(|_| App::State("Failed to set pipeline to Null".to_string()))?;
+        .map_err(|_| AppError::State("Failed to set pipeline to Null".to_string()))?;
 
     for element in pipeline.children() {
         pipeline
             .remove(&element)
-            .map_err(|_| App::Element("Failed to remove element from pipeline".to_string()))?;
+            .map_err(|_| AppError::Element("Failed to remove element from pipeline".to_string()))?;
     }
 
     pipeline
         .set_state(gstreamer::State::Ready)
-        .map_err(|_| App::State("Failed to set pipeline to Ready".to_string()))?;
+        .map_err(|_| AppError::State("Failed to set pipeline to Ready".to_string()))?;
 
+    // TODO: 网络不好，一直在重试时，如果这时候发起 next 命令，需要将此循环中断
     let mut retries = 5;
-    let play_mode = get_play_mode().await?;
     loop {
         if retries == 0 {
-            return Err(App::Fetch(
+            return Err(AppError::Fetch(
                 "Max retries reached for play next song".to_string(),
             ));
         }
@@ -539,12 +504,12 @@ async fn play_track(
             break;
         }
         log::info!("Failed to fetch audio URL, play next song");
-        move_to_next_track(play_mode).await?;
+        move_to_next_track().await?;
         retries -= 1;
     }
 
     pipeline
         .set_state(gstreamer::State::Playing)
-        .map_err(|_| App::State("Failed to set pipeline to Playing".to_string()))?;
+        .map_err(|_| AppError::State("Failed to set pipeline to Playing".to_string()))?;
     Ok(())
 }

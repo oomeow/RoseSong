@@ -1,20 +1,23 @@
 mod bilibili;
-mod error;
 
 use bilibili::fetch_audio_info::get_tracks;
 use clap::builder::PossibleValue;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
-use error::App;
+use rosesong::error::AppError;
+use rosesong::model::{Playlist, Track};
+use rosesong::utils::{
+    get_current_play_info, get_playlist, init_dir, is_playlist_empty, playlist_file,
+    save_playlist_to_file,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
-use std::{fmt::Display, io::Write};
-use tokio::{fs, io::AsyncBufReadExt, io::AsyncWriteExt, process::Command};
+use std::io::Write;
+use tokio::{fs, io::AsyncBufReadExt, process::Command};
 use zbus::{proxy, Connection};
 
-type StdResult<T> = std::result::Result<T, App>;
+type StdResult<T> = std::result::Result<T, AppError>;
 
 #[proxy(
     interface = "org.rosesong.Player",
@@ -184,78 +187,9 @@ struct DeleteCommand {
     all: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
-struct Track {
-    bvid: String,
-    cid: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sid: Option<String>,
-    title: String,
-    owner: String,
-}
-
-impl Track {
-    pub fn to_println_string(&self) -> String {
-        format!(
-            "{} {}, {} {}, {} {}, {} {}",
-            "bvid:".black(),
-            self.bvid.yellow(),
-            "cid:".black(),
-            self.cid,
-            "title:".black(),
-            self.title.cyan(),
-            "owner:".black(),
-            self.owner
-        )
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct Season {
-    id: String,
-    title: String,
-    cover: String,
-    intro: String,
-    owner: String,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct Playlist {
-    tracks: Vec<Track>,
-    seasons: Vec<Season>,
-}
-
-#[derive(Deserialize)]
-struct CurrentPlayInfo {
-    #[allow(dead_code)]
-    index: usize,
-    volume: usize,
-    play_mode: PlayMode,
-    track: Option<Track>,
-    playing_sid: Option<String>,
-    current_tracks: Vec<Track>,
-}
-
-#[derive(Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum PlayMode {
-    Loop,
-    Shuffle,
-    Repeat,
-}
-
-impl Display for PlayMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PlayMode::Loop => write!(f, "顺序循环"),
-            PlayMode::Shuffle => write!(f, "随机"),
-            PlayMode::Repeat => write!(f, "单曲循环"),
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> StdResult<()> {
+    init_dir().await?;
     let cli = Cli::parse();
     let connection = Connection::session().await?;
     let proxy = MyPlayerProxy::new(&connection).await?;
@@ -282,7 +216,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Vol(vol_cmd) => handle_volume_command(vol_cmd, &proxy).await,
             Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
             Commands::Add(add_cmd) => {
-                add_tracks(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
+                handle_add_command(add_cmd.fid, add_cmd.bvid, add_cmd.sid, &proxy).await
             }
             Commands::Delete(delete_cmd) => {
                 delete_tracks(delete_cmd.bvid, delete_cmd.owner, delete_cmd.all, &proxy).await
@@ -303,7 +237,7 @@ async fn handle_play_command(play_cmd: PlayCommand, proxy: &MyPlayerProxy<'_>) -
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else if let Some(bvid) = play_cmd.bvid {
         proxy.play_bvid(&bvid).await?;
         println!("播放指定 bvid");
@@ -324,7 +258,7 @@ async fn handle_pause_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else {
         proxy.pause().await?;
         println!("暂停播放");
@@ -336,7 +270,7 @@ async fn handle_next_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else {
         proxy.next().await?;
         println!("播放下一首");
@@ -348,7 +282,7 @@ async fn handle_previous_command(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else {
         proxy.previous().await?;
         println!("播放上一首");
@@ -370,7 +304,7 @@ async fn handle_volume_command(vol_cmd: VolumeCommand, proxy: &MyPlayerProxy<'_>
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else if vol_cmd.up {
         proxy.set_volume("up").await?;
         println!("增加 5% 音量");
@@ -392,7 +326,7 @@ async fn handle_mode_command(mode_cmd: ModeCommand, proxy: &MyPlayerProxy<'_>) -
     if !is_rosesong_running(proxy).await? {
         println!("{}", "rosesong 没有处于运行状态".red());
     } else if is_playlist_empty().await? {
-        println!("{}", "当前播放列表为空，请先添加歌曲".red());
+        println!("{}", "当前歌曲列表为空，请先添加歌曲".red());
     } else if mode_cmd.loop_mode {
         proxy.set_mode("Loop").await?;
         println!("设置为循环播放");
@@ -415,30 +349,6 @@ async fn is_rosesong_running(proxy: &MyPlayerProxy<'_>) -> StdResult<bool> {
     }
 }
 
-async fn is_playlist_empty() -> StdResult<bool> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    if !playlist_path.exists() {
-        return Ok(true);
-    }
-    let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-    Ok(content.trim().is_empty())
-}
-
-async fn initialize_directories() -> StdResult<PathBuf> {
-    let home_dir = std::env::var("HOME")?;
-    let playlists_dir = PathBuf::from(format!("{home_dir}/.config/rosesong/playlists"));
-    let required_dirs = [&playlists_dir];
-    for dir in required_dirs {
-        fs::create_dir_all(dir).await?;
-    }
-    // let playlist_path = format!("{home_dir}/.config/rosesong/playlists/playlist.toml");
-    let playlist_path = playlists_dir.join("playlist.toml");
-    if !playlist_path.exists() {
-        fs::write(&playlist_path, "").await?;
-    }
-    Ok(playlists_dir)
-}
-
 async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if is_rosesong_running(proxy).await? {
         println!("{}", "RoseSong 当前已经处于运行状态".yellow());
@@ -447,17 +357,17 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 
     let current_exe_path = std::env::current_exe()?;
     let exe_dir = current_exe_path.parent().ok_or_else(|| {
-        App::InvalidInput("Failed to get the directory of the executable".to_string())
+        AppError::InvalidInput("Failed to get the directory of the executable".to_string())
     })?;
     let rosesong_path = exe_dir.join("rosesong");
 
     if !rosesong_path.exists() {
-        return Err(App::InvalidInput(
+        return Err(AppError::InvalidInput(
             "rosesong executable not found in the same directory".to_string(),
         ));
     }
 
-    let child = Command::new(rosesong_path).spawn().map_err(App::Io)?;
+    let child = Command::new(rosesong_path).spawn()?;
     println!(
         "{}",
         format!(
@@ -469,22 +379,19 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     Ok(())
 }
 
-async fn add_tracks(
+async fn handle_add_command(
     fid: Option<String>,
     bvid: Option<String>,
-    cid: Option<String>,
+    sid: Option<String>,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    let playlist_path = playlist_file()?;
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    import_favorite_or_bvid_or_sid(fid, bvid, cid).await?;
+    import_favorite_or_bvid_or_sid(fid, bvid, sid).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    if old_content != new_content {
-        if let Ok(is_running) = is_rosesong_running(proxy).await {
-            if is_running {
-                proxy.playlist_change().await?;
-            }
-        }
+    let is_running = is_rosesong_running(proxy).await?;
+    if is_running && old_content != new_content {
+        proxy.playlist_change().await?;
     }
     Ok(())
 }
@@ -495,24 +402,20 @@ async fn import_favorite_or_bvid_or_sid(
     sid: Option<String>,
 ) -> StdResult<()> {
     let client = reqwest::Client::new();
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
     println!("正在获取相关信息");
     let (new_tracks, new_season) = get_tracks(&client, fid, bvid, sid).await?;
 
     let mut tracks = Vec::new();
     let mut seasons = Vec::new();
-    if playlist_path.exists() {
-        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-        let playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
+    let playlist = get_playlist().await;
+    if let Some(playlist) = playlist {
         tracks.extend(playlist.tracks);
         seasons.extend(playlist.seasons);
     }
-
     // update tracks
     let new_tracks_bvid: Vec<String> = new_tracks.iter().map(|t| t.bvid.clone()).collect();
     tracks.retain(|t| !new_tracks_bvid.contains(&t.bvid));
     tracks.extend(new_tracks);
-
     // update seasons
     if let Some(new_season) = new_season {
         seasons.retain(|s| s.id != new_season.id);
@@ -520,12 +423,7 @@ async fn import_favorite_or_bvid_or_sid(
     }
 
     let playlist = Playlist { tracks, seasons };
-    let toml_content = toml::to_string(&playlist)
-        .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
-    let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;
-    file.write_all(toml_content.as_bytes())
-        .await
-        .map_err(App::Io)?;
+    save_playlist_to_file(&playlist).await?;
     println!("{}", "导入成功".green());
     Ok(())
 }
@@ -536,12 +434,16 @@ async fn delete_tracks(
     all: bool,
     proxy: &MyPlayerProxy<'_>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
+    let playlist_path = playlist_file()?;
+    if !playlist_path.exists() {
+        println!("{}", "歌曲列表文件不存在".red());
+        return Ok(());
+    }
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     perform_deletion(bvid, owner, all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     let is_running = is_rosesong_running(proxy).await?;
-    if old_content != new_content && is_running {
+    if is_running && old_content != new_content {
         if is_playlist_empty().await? {
             proxy.playlist_is_empty().await?;
         } else {
@@ -552,11 +454,6 @@ async fn delete_tracks(
 }
 
 async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    if !playlist_path.exists() {
-        println!("{}", "播放列表文件不存在".red());
-        return Ok(());
-    }
     if all {
         print!("即将清空播放列表，是否确认删除所有歌曲？[y/n]: ");
         std::io::stdout().flush().unwrap();
@@ -567,16 +464,14 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
             .await
             .expect("Failed to read line");
         if confirmation.trim().eq_ignore_ascii_case("y") {
-            fs::write(&playlist_path, "").await.map_err(App::Io)?;
+            save_playlist_to_file(&Playlist::default()).await?;
             println!("{}", "播放列表已清空".green());
         } else {
             println!("{}", "取消清空操作".yellow());
         }
         return Ok(());
     }
-    let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-    let mut playlist: Playlist = toml::from_str(&content)
-        .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
+    let mut playlist = get_playlist().await.unwrap_or_default();
     let mut tracks_to_delete: Vec<Track> = Vec::new();
     if let Some(bvid) = bvid {
         tracks_to_delete.extend(
@@ -624,12 +519,7 @@ async fn perform_deletion(bvid: Option<String>, owner: Option<String>, all: bool
             .collect::<HashSet<String>>();
         playlist.seasons.retain(|s| exist_seasons.contains(&s.id));
         // save to file
-        let toml_content = toml::to_string(&playlist)
-            .map_err(|_| App::DataParsing("Failed to serialize tracks to TOML".to_string()))?;
-        let mut file = fs::File::create(&playlist_path).await.map_err(App::Io)?;
-        file.write_all(toml_content.as_bytes())
-            .await
-            .map_err(App::Io)?;
+        save_playlist_to_file(&playlist).await?;
         println!("{}", "删除成功".green());
     } else {
         println!("{}", "取消删除操作".yellow());
@@ -642,56 +532,52 @@ async fn find_track(
     title: Option<String>,
     owner: Option<String>,
 ) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    if !playlist_path.exists() {
-        println!("{}", "播放列表文件不存在".red());
-        return Ok(());
-    }
-    let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-    let playlist: Playlist = toml::from_str(&content)
-        .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
-    let mut results = playlist.tracks.clone();
-    if let Some(bvid) = bvid {
-        results.retain(|track| track.bvid == bvid);
-    }
-    if let Some(title) = title {
-        results.retain(|track| track.title.contains(&title));
-    }
-    if let Some(owner) = owner {
-        results.retain(|track| track.owner.contains(&owner));
-    }
-    if results.is_empty() {
-        println!("没有找到符合条件的track");
-    } else if results.len() <= 15 {
-        for (i, track) in results.iter().enumerate() {
-            println!("{:<2}. {}", i + 1, track.to_println_string());
+    let playlist = get_playlist().await;
+    if let Some(playlist) = playlist {
+        let mut results = playlist.tracks;
+        if let Some(bvid) = bvid {
+            results.retain(|track| track.bvid == bvid);
+        }
+        if let Some(title) = title {
+            results.retain(|track| track.title.contains(&title));
+        }
+        if let Some(owner) = owner {
+            results.retain(|track| track.owner.contains(&owner));
+        }
+        if results.is_empty() {
+            println!("没有找到符合条件的 track");
+        } else if results.len() <= 15 {
+            for (i, track) in results.iter().enumerate() {
+                println!("{:<2}. {}", i + 1, track.to_println_string());
+            }
+        } else {
+            show_tracks_page(results).await;
         }
     } else {
-        show_tracks_page(results).await;
+        println!("{}", "歌曲列表文件不存在".red());
     }
     Ok(())
 }
 
 async fn display_playlist() -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    if !playlist_path.exists() {
-        eprintln!("播放列表文件不存在");
+    let is_empty = is_playlist_empty().await?;
+    if is_empty {
+        println!("{}", "歌曲列表为空".red());
         return Ok(());
     }
-    let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-    let playlist: Playlist = toml::from_str(&content)
-        .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
-    let tracks = playlist.tracks;
-    show_tracks_page(tracks).await;
+    if let Some(playlist) = get_playlist().await {
+        let tracks = playlist.tracks;
+        show_tracks_page(tracks).await;
+    }
     Ok(())
 }
 
 async fn handle_list_all(list_all_type: ListAllType) -> StdResult<()> {
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    if playlist_path.exists() {
-        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-        let playlist: Playlist = toml::from_str(&content)
-            .map_err(|_| App::DataParsing("Failed to parse playlist.toml".to_string()))?;
+    let is_empty = is_playlist_empty().await?;
+    if is_empty {
+        return Ok(());
+    }
+    if let Some(playlist) = get_playlist().await {
         match list_all_type {
             ListAllType::Song => {
                 let tracks = playlist.tracks;
@@ -751,30 +637,16 @@ async fn show_tracks_page(tracks: Vec<Track>) {
     }
 }
 
-async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
+async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
     // play list
-    let playlist_path = initialize_directories().await?.join("playlist.toml");
-    let mut playlist = Playlist::default();
-    if playlist_path.exists() {
-        let content = fs::read_to_string(&playlist_path).await.map_err(App::Io)?;
-        playlist = toml::from_str::<Playlist>(&content).unwrap_or_default();
-    }
+    let playlist = get_playlist().await.unwrap_or_default();
     let is_playlist_empty = is_playlist_empty().await?;
-
     // current play info
-    let current_file_path = format!(
-        "{}/.config/rosesong/current.toml",
-        std::env::var("HOME").expect("Failed to get HOME environment variable")
-    );
-    let content = fs::read_to_string(&current_file_path)
-        .await
-        .map_err(App::Io)?;
-    let current_play_info = toml::from_str::<CurrentPlayInfo>(&content)
-        .map_err(|_| App::DataParsing("Failed to parse current.toml".to_string()))?;
-    let mut season = None;
+    let current_play_info = get_current_play_info().await.unwrap_or_default();
+    let mut current_play_season = None;
     if let Some(sid) = current_play_info.playing_sid.clone() {
-        let season_ = playlist.seasons.iter().find(|s| s.id == sid).cloned();
-        season = season_;
+        let season = playlist.seasons.iter().find(|s| s.id == sid).cloned();
+        current_play_season = season;
     }
 
     // show info
@@ -798,7 +670,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     );
 
     let play_status = {
-        if let Some(season) = &season {
+        if let Some(season) = &current_play_season {
             let season_name = season.title.clone().yellow();
             format!("仅播放合集 [{season_name}]").cyan()
         } else {
@@ -814,7 +686,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), App> {
     };
     println!("全部歌曲: {playlist_status}\n");
 
-    if let Some(season) = season {
+    if let Some(season) = current_play_season {
         let current_tracks_lenght = if is_playlist_empty {
             "空".red()
         } else {

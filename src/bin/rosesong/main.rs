@@ -1,20 +1,18 @@
 mod bilibili;
 mod dbus;
-mod error;
 mod player;
 mod temp_dbus;
 
-use crate::error::App;
-use crate::player::playlist::PlayMode;
 use crate::player::Audio;
 use flexi_logger::{Cleanup, Criterion, Duplicate, FileSpec, Logger, Naming};
-use log::{error, warn};
+use log::{error, info, warn};
 use player::playlist::{load, CURRENT_PLAY_INFO};
-use std::path::Path;
+use rosesong::error::AppError;
+use rosesong::model::PlayMode;
+use rosesong::utils::{init_dir, is_playlist_empty, logs_dir};
 use std::process;
 use std::sync::Arc;
 use tikv_jemallocator::Jemalloc;
-use tokio::fs;
 use tokio::{
     sync::{mpsc, watch, Mutex},
     task,
@@ -24,34 +22,9 @@ use tokio::{
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
-async fn main() -> Result<(), App> {
-    let home_dir = std::env::var("HOME").map_err(|e| {
-        App::Io(
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Failed to get HOME environment variable: {e}"),
-            )
-            .to_string(),
-        )
-    })?;
-
-    // Define the required directories
-    let required_dirs = [
-        format!("{home_dir}/.config/rosesong/logs"),
-        format!("{home_dir}/.config/rosesong/playlists"),
-    ];
-
-    // Ensure all directories exist
-    for dir in &required_dirs {
-        fs::create_dir_all(dir).await?;
-    }
-
-    // Check if playlist.toml exists, if not, create an empty one
-    let playlist_path = format!("{home_dir}/.config/rosesong/playlists/playlist.toml");
-    if !Path::new(&playlist_path).exists() {
-        fs::write(&playlist_path, "").await?;
-    }
-
+async fn main() -> Result<(), AppError> {
+    // init dir
+    init_dir().await?;
     // Logger setup
     Logger::try_with_str("info")?
         .format(|w, _, record| {
@@ -64,7 +37,7 @@ async fn main() -> Result<(), App> {
                 record.args()
             )
         })
-        .log_to_file(FileSpec::default().directory(&required_dirs[0]))
+        .log_to_file(FileSpec::default().directory(logs_dir()?))
         // .duplicate_to_stdout(Duplicate::All) // for debug
         .rotate(
             Criterion::Size(1_000_000),
@@ -76,19 +49,21 @@ async fn main() -> Result<(), App> {
 
     // Check if the playlist is empty
     {
-        let playlist_content = fs::read_to_string(&playlist_path).await?;
-        if playlist_content.trim().is_empty() {
+        let is_empty = is_playlist_empty().await?;
+        if is_empty {
             warn!("Current playlist is empty");
             let (stop_sender, stop_receiver) = watch::channel(());
+            // wait for cli to add song, and then this temp dbus listener will stop
             let _ = start_temp_dbus_listener(stop_sender).await;
             wait_for_stop_signal(stop_receiver).await;
-            let playlist_content = fs::read_to_string(&playlist_path).await?;
-            if playlist_content.trim().is_empty() {
+            // if playlist is still empty, shutdown process
+            if is_playlist_empty().await? {
                 process::exit(0);
             }
         }
     }
 
+    info!("loading init");
     load().await?;
     let (stop_sender, stop_receiver) = watch::channel(());
     let play_mode = CURRENT_PLAY_INFO.read().await.play_mode;
@@ -125,7 +100,7 @@ async fn start_temp_dbus_listener(
 fn start_player_and_dbus_listener(
     play_mode: PlayMode,
     stop_signal: &watch::Sender<()>,
-) -> Result<Audio, App> {
+) -> Result<Audio, AppError> {
     let (command_sender, command_receiver) = mpsc::channel(1);
 
     let audio_player = Audio::new(play_mode, Arc::new(Mutex::new(command_receiver)))?;

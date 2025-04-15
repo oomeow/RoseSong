@@ -1,10 +1,10 @@
-use crate::error::App;
 use reqwest::Client;
+use rosesong::error::AppError;
 use serde_json::Value;
 
 const BASE_API_URL: &str = "https://api.bilibili.com/x/player/playurl?fnval=16";
 
-pub async fn fetch_audio_url(client: &Client, bvid: &str, cid: &str) -> Result<String, App> {
+pub async fn fetch_audio_url(client: &Client, bvid: &str, cid: &str) -> Result<String, AppError> {
     let url = format!("{BASE_API_URL}&bvid={bvid}&cid={cid}");
     log::info!("Fetching audio URL");
     let response = client.get(&url).send().await?;
@@ -12,5 +12,5 @@ pub async fn fetch_audio_url(client: &Client, bvid: &str, cid: &str) -> Result<S
     json["data"]["dash"]["audio"][0]["baseUrl"]
         .as_str()
         .map(std::string::ToString::to_string)
-        .ok_or_else(|| App::DataParsing("解析音频URL失败".to_string()))
+        .ok_or_else(|| AppError::DataParsing("解析音频URL失败".to_string()))
 }
