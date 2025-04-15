@@ -61,40 +61,40 @@ jobs:
       - name: Build for Debian
         uses: ./.github/actions/build-for-debian
 
-      - name: Copy Artifacts to Debian Directory
-        run: |
-          mkdir ./debian/input
-          cp ./target/release/rosesong ./debian/input/
-          cp ./target/release/rsg ./debian/input/
-          chmod +x ./debian/input/*
+      # - name: Copy Artifacts to Debian Directory
+      #   run: |
+      #     mkdir ./debian/input
+      #     cp ./target/release/rosesong ./debian/input/
+      #     cp ./target/release/rsg ./debian/input/
+      #     chmod +x ./debian/input/*
 
-      - name: Generate Control File
-        id: control-gen
-        uses: Nightwind-Developments/debian-control-file-builder@latest
-        with:
-          config-file: "debian/control_file_generate/template.json"
-          deps-file: "debian/control_file_generate/dependencies.txt"
-          output-path: "debian/input/"
+      # - name: Generate Control File
+      #   id: control-gen
+      #   uses: Nightwind-Developments/debian-control-file-builder@latest
+      #   with:
+      #     config-file: "debian/control_file_generate/template.json"
+      #     deps-file: "debian/control_file_generate/dependencies.txt"
+      #     output-path: "debian/input/"
 
-      - name: Prints Output File Path
-        run: echo "${{ steps.control-gen.outputs.control_file_path }}"
+      # - name: Prints Output File Path
+      #   run: echo "${{ steps.control-gen.outputs.control_file_path }}"
 
-      - name: Confirms Control File is Present
-        run: ls ${{ steps.control-gen.outputs.control_file_path }}
+      # - name: Confirms Control File is Present
+      #   run: ls ${{ steps.control-gen.outputs.control_file_path }}
 
-      - name: Prints Contents of Input Resources
-        run: ls -l debian/input/
+      # - name: Prints Contents of Input Resources
+      #   run: ls -l debian/input/
 
-      - name: Build Docker Container & Run Debian Packer
-        uses: Nightwind-Developments/debian-packer@latest
-        id: container
-        with:
-          input_dir: "debian/input"
-          output_dir: "output"
-          layout_map_file: "debian/rosesong-map.json"
-          package_name: "rosesong"
-          package_version: ${{ env.VERSION }}
-          package_arch: "amd64"
+      # - name: Build Docker Container & Run Debian Packer
+      #   uses: Nightwind-Developments/debian-packer@latest
+      #   id: container
+      #   with:
+      #     input_dir: "debian/input"
+      #     output_dir: "output"
+      #     layout_map_file: "debian/rosesong-map.json"
+      #     package_name: "rosesong"
+      #     package_version: ${{ env.VERSION }}
+      #     package_arch: "amd64"
 
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
@@ -104,8 +104,8 @@ jobs:
       - name: List Artifacts Directory
         run: ls -R ./artifacts
 
-      - name: Copy Generated Package to Artifacts Directory
-        run: cp ${{ steps.container.outputs.generated_package_path }} ./artifacts
+      # - name: Copy Generated Package to Artifacts Directory
+      #   run: cp ${{ steps.container.outputs.generated_package_path }} ./artifacts
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
@@ -114,4 +114,6 @@ jobs:
           name: v${{ env.VERSION }}
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          files: ./artifacts/**
+          files: |
+            ./target/debian/*.deb
+            ./artifacts/**
