@@ -10,9 +10,6 @@ keywords = ["audio", "player", "bilibili", "gstreamer", "dbus"]
 categories = ["multimedia::audio", "multimedia", "command-line-utilities"]
 readme = "README.md"
 
-[profile.release]
-lto = "fat"
-
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
 clap_complete = "4.5.47"
@@ -50,3 +47,8 @@ extended-description = "Command line player built by rust based on gstreamer dec
 depends = "libc6, libgstreamer1.0-0, libglib2.0-0, libssl-dev, libdbus-1-3, libdbus-glib-1-2"
 section = "sound"
 priority = "optional"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
