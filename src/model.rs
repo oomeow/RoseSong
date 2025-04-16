@@ -69,6 +69,22 @@ pub struct Season {
     pub owner: String,
 }
 
+impl Season {
+    pub fn to_println_string(&self) -> String {
+        format!(
+            "{} {}, {} {}, {} {}, {} {}",
+            "sid:".black(),
+            self.id.yellow(),
+            "title:".black(),
+            self.title.cyan(),
+            "owner:".black(),
+            self.owner,
+            "intro:".black(),
+            self.intro
+        )
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Playlist {
     pub tracks: Vec<Track>,

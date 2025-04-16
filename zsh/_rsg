@@ -127,6 +127,7 @@ _rsg() {
         ;;
         (list)
             _arguments "${_arguments_options[@]}" : \
+            '-s[显示所有合集]' \
             '-h[Print help]' \
             '--help[Print help]' \
             && ret=0
@@ -230,10 +231,10 @@ _rsg_commands() {
 'stop:停止 RoseSong' \
 'vol:设置音量大小' \
 'mode:设置播放模式' \
-'add:添加歌曲到播放列表' \
-'find:在播放列表中查找歌曲' \
-'delete:从播放列表中删除歌曲' \
-'list:显示播放列表' \
+'add:添加歌曲到歌曲列表' \
+'find:在歌曲列表中查找歌曲' \
+'delete:从歌曲列表中删除歌曲' \
+'list:显示歌曲列表' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -265,10 +266,10 @@ _rsg__help_commands() {
 'stop:停止 RoseSong' \
 'vol:设置音量大小' \
 'mode:设置播放模式' \
-'add:添加歌曲到播放列表' \
-'find:在播放列表中查找歌曲' \
-'delete:从播放列表中删除歌曲' \
-'list:显示播放列表' \
+'add:添加歌曲到歌曲列表' \
+'find:在歌曲列表中查找歌曲' \
+'delete:从歌曲列表中删除歌曲' \
+'list:显示歌曲列表' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \

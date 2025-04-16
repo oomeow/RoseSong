@@ -106,17 +106,17 @@ enum Commands {
     #[command(about = "设置播放模式")]
     Mode(ModeCommand),
 
-    #[command(about = "添加歌曲到播放列表")]
+    #[command(about = "添加歌曲到歌曲列表")]
     Add(AddCommand),
 
-    #[command(about = "在播放列表中查找歌曲")]
+    #[command(about = "在歌曲列表中查找歌曲")]
     Find(FindCommand),
 
-    #[command(about = "从播放列表中删除歌曲")]
+    #[command(about = "从歌曲列表中删除歌曲")]
     Delete(DeleteCommand),
 
-    #[command(about = "显示播放列表")]
-    List,
+    #[command(about = "显示歌曲列表")]
+    List(ListCommand),
 
     #[command(about = "启动 RoseSong")]
     Start,
@@ -189,6 +189,12 @@ struct DeleteCommand {
     all: bool,
 }
 
+#[derive(Parser)]
+struct ListCommand {
+    #[arg(short = 's', action = clap::ArgAction::SetTrue, help = "显示所有合集")]
+    season: bool,
+}
+
 #[tokio::main]
 async fn main() -> StdResult<()> {
     init_dir().await?;
@@ -220,7 +226,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Add(add_cmd) => handle_add_command(add_cmd, &proxy).await,
             Commands::Delete(del_cmd) => handle_delete_command(del_cmd, &proxy).await,
             Commands::Find(find_cmd) => handle_find_comand(find_cmd).await,
-            Commands::List => display_playlist().await,
+            Commands::List(list_cmd) => display_playlist(list_cmd).await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
         }
@@ -446,7 +452,7 @@ async fn perform_deletion(
     all: bool,
 ) -> StdResult<()> {
     if all {
-        print!("即将清空播放列表，是否确认删除所有歌曲？[y/n]: ");
+        print!("即将清空歌曲列表，是否确认删除所有歌曲？[y/n]: ");
         std::io::stdout().flush().unwrap();
         let mut confirmation = String::new();
         let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
@@ -456,7 +462,7 @@ async fn perform_deletion(
             .expect("Failed to read line");
         if confirmation.trim().eq_ignore_ascii_case("y") {
             save_playlist_to_file(&Playlist::default()).await?;
-            println!("{}", "播放列表已清空".green());
+            println!("{}", "歌曲列表已清空".green());
         } else {
             println!("{}", "取消清空操作".yellow());
         }
@@ -548,12 +554,9 @@ async fn handle_find_comand(find_cmd: FindCommand) -> StdResult<()> {
         }
         if results.is_empty() {
             println!("没有找到符合条件的 track");
-        } else if results.len() <= 15 {
-            for (i, track) in results.iter().enumerate() {
-                println!("{:<2}. {}", i + 1, track.to_println_string());
-            }
         } else {
-            show_tracks_page(results).await;
+            let list = results.iter().map(|t| t.to_println_string()).collect();
+            show_list_page(list).await;
         }
     } else {
         println!("{}", "歌曲列表文件不存在".red());
@@ -561,54 +564,67 @@ async fn handle_find_comand(find_cmd: FindCommand) -> StdResult<()> {
     Ok(())
 }
 
-async fn display_playlist() -> StdResult<()> {
+async fn display_playlist(list_cmd: ListCommand) -> StdResult<()> {
     let is_empty = is_playlist_empty().await?;
     if is_empty {
         println!("{}", "歌曲列表为空".red());
         return Ok(());
     }
     if let Some(playlist) = get_playlist().await {
-        let tracks = playlist.tracks;
-        show_tracks_page(tracks).await;
+        if list_cmd.season {
+            let seasons = playlist.seasons;
+            let list = seasons.iter().map(|s| s.to_println_string()).collect();
+            show_list_page(list).await;
+        } else {
+            let tracks = playlist.tracks;
+            let list = tracks.iter().map(|t| t.to_println_string()).collect();
+            show_list_page(list).await;
+        }
     }
     Ok(())
 }
 
-async fn show_tracks_page(tracks: Vec<Track>) {
-    let total_tracks = tracks.len();
+async fn show_list_page(list: Vec<String>) {
+    let total_tracks = list.len();
     let page_size = 10;
     let total_pages = total_tracks.div_ceil(page_size);
     let mut current_page = 1;
-    loop {
-        let start = (current_page - 1) * page_size;
-        let end = (start + page_size).min(total_tracks);
-        for (i, track) in tracks[start..end].iter().enumerate() {
-            println!("{:<2}. {}", start + i + 1, track.to_println_string());
+    if list.len() <= 15 {
+        for (i, item) in list.iter().enumerate() {
+            println!("{:<2}. {}", i + 1, item);
         }
-        print!(
-            "{}",
-            format!(
-                "当前第 {} 页, 请输入页码 [1-{}], 或输入 'q' 退出：",
-                current_page.to_string().green(),
-                total_pages
-            )
-            .blue()
-        );
-        std::io::stdout().flush().unwrap();
-        let mut input = String::new();
-        let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
-        stdin
-            .read_line(&mut input)
-            .await
-            .expect("Failed to read line");
-        if input.trim().eq_ignore_ascii_case("q") {
-            break;
+    } else {
+        loop {
+            let start = (current_page - 1) * page_size;
+            let end = (start + page_size).min(total_tracks);
+            for (i, line) in list[start..end].iter().enumerate() {
+                println!("{:<2}. {}", start + i + 1, line);
+            }
+            print!(
+                "{}",
+                format!(
+                    "当前第 {} 页, 请输入页码 [1-{}], 或输入 'q' 退出：",
+                    current_page.to_string().green(),
+                    total_pages
+                )
+                .blue()
+            );
+            std::io::stdout().flush().unwrap();
+            let mut input = String::new();
+            let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
+            stdin
+                .read_line(&mut input)
+                .await
+                .expect("Failed to read line");
+            if input.trim().eq_ignore_ascii_case("q") {
+                break;
+            }
+            match input.trim().parse::<usize>() {
+                Ok(page) if page >= 1 && page <= total_pages => current_page = page,
+                _ => println!("{}", "无效的输入，请输入有效的页码或 'q' 退出".red()),
+            }
+            println!("\n");
         }
-        match input.trim().parse::<usize>() {
-            Ok(page) if page >= 1 && page <= total_pages => current_page = page,
-            _ => println!("{}", "无效的输入，请输入有效的页码或 'q' 退出".red()),
-        }
-        println!("\n");
     }
 }
 
