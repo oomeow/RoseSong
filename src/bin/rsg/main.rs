@@ -606,10 +606,7 @@ async fn show_tracks_page(tracks: Vec<Track>) {
         }
         match input.trim().parse::<usize>() {
             Ok(page) if page >= 1 && page <= total_pages => current_page = page,
-            _ => println!(
-                "{}",
-                "无效的输入，请输入有效的页码或 'q' 退出".red().on_black()
-            ),
+            _ => println!("{}", "无效的输入，请输入有效的页码或 'q' 退出".red()),
         }
         println!("\n");
     }
@@ -628,7 +625,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
     }
 
     // show info
-    println!("{}", "[rosesong 信息]".blue().bold().on_black());
+    println!("{}", "[rosesong 信息]".blue().bold());
     let is_running = is_rosesong_running(proxy).await?;
     let running_status = if is_running {
         "正在运行".green()
@@ -674,7 +671,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
             )
             .normal()
         };
-        println!("{}", "[当前合集信息]".blue().bold().on_black());
+        println!("{}", "[当前合集信息]".blue().bold());
         println!("ID：{}", season.id.to_string().yellow());
         println!("全部歌曲：{current_tracks_lenght}");
         println!("标题：{}", season.title.to_string().yellow());
@@ -683,7 +680,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
     }
     let track_info = current_play_info.track;
     if let Some(track) = track_info {
-        println!("{}", "[当前歌曲信息]".blue().bold().on_black());
+        println!("{}", "[当前歌曲信息]".blue().bold());
         println!(
             "当前播放列表索引：{}",
             current_play_info.index.to_string().yellow()
