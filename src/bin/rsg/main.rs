@@ -118,6 +118,9 @@ enum Commands {
     #[command(about = "显示歌曲列表")]
     List(ListCommand),
 
+    #[command(about = "更新所有合集")]
+    Update,
+
     #[command(about = "启动 RoseSong")]
     Start,
 
@@ -227,6 +230,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Delete(del_cmd) => handle_delete_command(del_cmd, &proxy).await,
             Commands::Find(find_cmd) => handle_find_comand(find_cmd).await,
             Commands::List(list_cmd) => display_playlist(list_cmd).await,
+            Commands::Update => update_season().await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
         }
@@ -384,7 +388,9 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
 async fn handle_add_command(add_cmd: AddCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     let playlist_path = playlist_file()?;
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
+    println!("正在获取相关信息");
     import_favorite_or_bvid_or_sid(add_cmd.fid, add_cmd.bvid, add_cmd.sid).await?;
+    println!("{}", "导入成功".green());
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     let is_running = is_rosesong_running(proxy).await?;
     if is_running && old_content != new_content {
@@ -399,7 +405,6 @@ async fn import_favorite_or_bvid_or_sid(
     sid: Option<String>,
 ) -> StdResult<()> {
     let client = reqwest::Client::new();
-    println!("正在获取相关信息");
     let (new_tracks, new_season) = get_tracks(&client, fid, bvid, sid).await?;
 
     let mut tracks = Vec::new();
@@ -421,7 +426,6 @@ async fn import_favorite_or_bvid_or_sid(
 
     let playlist = Playlist { tracks, seasons };
     save_playlist_to_file(&playlist).await?;
-    println!("{}", "导入成功".green());
     Ok(())
 }
 
@@ -580,6 +584,25 @@ async fn display_playlist(list_cmd: ListCommand) -> StdResult<()> {
             let list = tracks.iter().map(|t| t.to_println_string()).collect();
             show_list_page(list).await;
         }
+    }
+    Ok(())
+}
+
+async fn update_season() -> StdResult<()> {
+    if let Some(mut playlist) = get_playlist().await {
+        let retain_tracks = playlist
+            .tracks
+            .clone()
+            .into_iter()
+            .filter(|t| t.sid.is_none())
+            .collect::<Vec<Track>>();
+        playlist.tracks = retain_tracks;
+        save_playlist_to_file(&playlist).await?;
+        for season in playlist.seasons {
+            println!("更新合集：{}", season.title.blue());
+            import_favorite_or_bvid_or_sid(None, None, Some(season.id)).await?;
+        }
+        println!("{}", "合集更新成功".green());
     }
     Ok(())
 }

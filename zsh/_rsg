@@ -132,6 +132,12 @@ _rsg() {
             '--help[Print help]' \
             && ret=0
         ;;
+        (update)
+            _arguments "${_arguments_options[@]}" : \
+            '-h[Print help]' \
+            '--help[Print help]' \
+            && ret=0
+        ;;
         (start)
             _arguments "${_arguments_options[@]}" : \
             '-h[Print help]' \
@@ -200,6 +206,10 @@ _rsg() {
                     _arguments "${_arguments_options[@]}" : \
                     && ret=0
                 ;;
+                (update)
+                    _arguments "${_arguments_options[@]}" : \
+                    && ret=0
+                ;;
                 (start)
                     _arguments "${_arguments_options[@]}" : \
                     && ret=0
@@ -235,6 +245,7 @@ _rsg_commands() {
 'find:在歌曲列表中查找歌曲' \
 'delete:从歌曲列表中删除歌曲' \
 'list:显示歌曲列表' \
+'update:更新所有合集' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -270,6 +281,7 @@ _rsg__help_commands() {
 'find:在歌曲列表中查找歌曲' \
 'delete:从歌曲列表中删除歌曲' \
 'list:显示歌曲列表' \
+'update:更新所有合集' \
 'start:启动 RoseSong' \
 'status:显示当前播放的歌曲信息' \
 'help:Print this message or the help of the given subcommand(s)' \
@@ -326,6 +338,11 @@ _rsg__help__prev_commands() {
     local commands; commands=()
     _describe -t commands 'rsg help prev commands' commands "$@"
 }
+(( $+functions[_rsg__help__update_commands] )) ||
+_rsg__help__update_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg help update commands' commands "$@"
+}
 (( $+functions[_rsg__help__start_commands] )) ||
 _rsg__help__start_commands() {
     local commands; commands=()
@@ -375,6 +392,11 @@ _rsg__play_commands() {
 _rsg__prev_commands() {
     local commands; commands=()
     _describe -t commands 'rsg prev commands' commands "$@"
+}
+(( $+functions[_rsg__update_commands] )) ||
+_rsg__update_commands() {
+    local commands; commands=()
+    _describe -t commands 'rsg update commands' commands "$@"
 }
 (( $+functions[_rsg__start_commands] )) ||
 _rsg__start_commands() {
