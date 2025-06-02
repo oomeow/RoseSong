@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 定义仓库的基础URL和安装目标目录
-REPO_URL="https://github.com/huahuadeliaoliao/RoseSong"
-RELEASE_URL="https://github.com/huahuadeliaoliao/RoseSong/releases/download/v1.0.0"
+REPO_URL="https://github.com/oomeow/RoseSong"
+RELEASE_URL="https://github.com/oomeow/RoseSong/releases/download/alpha"
 DESTINATION="$HOME/.local/bin"
 
 # 确保目标安装目录存在

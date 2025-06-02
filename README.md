@@ -1,4 +1,3 @@
-
 <p align="center">
     <img src="img/RoseSong.png" width="200" height="200" alt="RoseSong Logo">
 </p>
@@ -10,32 +9,38 @@
 **RoseSong** 是一个基于 Rust 构建的命令行播放器，依赖 GStreamer 解码播放 Bilibili 音频。它通过 D-Bus 进行进程间通信，可以快速导入 B 站收藏夹（注意：目标收藏夹在导入时需要设置为公开状态）。
 
 ---
+
 <details>
   <summary><strong style="font-size: 1.5em;">安装说明</strong></summary>
 
 ## 1. Linux 系统
 
 ### 1.1 Debian/Ubuntu 用户
-你可以直接下载 [Release 页面](https://github.com/huahuadeliaoliao/RoseSong/releases) 中提供的 `.deb` 文件进行安装。
+
+你可以直接下载 [Release 页面](https://github.com/oomeow/RoseSong/releases) 中提供的 `.deb` 文件进行安装。
 
 ### 1.2 其他 Linux 发行版
+
 - RoseSong 依赖 GStreamer 和 D-Bus，绝大多数 Linux 系统默认已经安装这些依赖。如果运行遇到问题，请确保这两个依赖项已经安装。
+  - Arch Linux 请参考 [GStreamer 安装](https://wiki.archlinuxcn.org/wiki/GStreamer#%E5%AE%89%E8%A3%85)
 - 使用以下命令安装 RoseSong，这将会把 `rosesong` 和 `rsg` 二进制可执行文件（仅支持 Linux amd64）安装到当前用户的 `.local/bin` 目录中：
-  
+
 ```bash
-curl -s https://raw.githubusercontent.com/huahuadeliaoliao/RoseSong/main/installation_script/install_rosesong.sh | bash
+curl -s https://raw.githubusercontent.com/oomeow/RoseSong/main/installation_script/install_rosesong.sh | bash
 ```
 
-- 也可以直接使用cargo安装RoseSong：
+- 也可以直接使用 cargo 安装 RoseSong：
 
 ```bash
-cargo install rosesong
+cargo install --git https://github.com/oomeow/RoseSong
 ```
 
 ## 2. MacOS
-- 如果安装了GStreamer和D-Bus可以使用cargo安装RoseSong
+
+- 如果安装了 GStreamer 和 D-Bus 可以使用 cargo 安装 RoseSong
 
 ## 3. Windows
+
 - **暂不支持**
 
 </details>
@@ -47,7 +52,8 @@ cargo install rosesong
 在 Linux 上构建 RoseSong 需要安装 Rust 以及 [GStreamer 开发包](https://gstreamer.freedesktop.org/documentation/installing/on-linux.html?gi-language=c#)。构建命令如下：
 
 ```bash
-cargo b --release
+# same as: cargo build --release
+cargo b -r
 ```
 
 构建完成后的二进制文件位于 `target/release` 目录下。
@@ -101,12 +107,3 @@ cargo b --release
 </p>
 
 </details>
-
----
-
-# 版本历史
-
-## 版本 1.0.0
-- [查看版本信息](https://github.com/huahuadeliaoliao/RoseSong/releases/tag/v1.0.0)
-
----
