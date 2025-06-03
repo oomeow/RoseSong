@@ -230,7 +230,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Delete(del_cmd) => handle_delete_command(del_cmd, &proxy).await,
             Commands::Find(find_cmd) => handle_find_comand(find_cmd).await,
             Commands::List(list_cmd) => display_playlist(list_cmd).await,
-            Commands::Update => update_season().await,
+            Commands::Update => update_season(&proxy).await,
             Commands::Start => start_rosesong(&proxy).await,
             Commands::Status => display_status(&proxy).await,
         }
@@ -385,6 +385,42 @@ async fn start_rosesong(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     Ok(())
 }
 
+async fn reload_playlist(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
+    let is_running = is_rosesong_running(proxy).await?;
+    if is_running {
+        if is_playlist_empty().await? {
+            proxy.playlist_is_empty().await?;
+        } else {
+            proxy.playlist_change().await?;
+        }
+    } else if let Some(mut cur_play_info) = get_current_play_info().await {
+        if let Some(cur_track) = cur_play_info.get_current_track() {
+            let playlist = get_playlist().await.unwrap_or_default();
+            if let Some(sid) = cur_play_info.playing_sid.as_ref() {
+                let tracks = playlist.find_tracks_in_season(sid);
+                cur_play_info.current_tracks = tracks;
+            } else {
+                cur_play_info.current_tracks = playlist.tracks;
+            }
+            let cur_bvid = cur_track.bvid;
+            let new_index = cur_play_info
+                .current_tracks
+                .clone()
+                .iter()
+                .position(|t| t.bvid == cur_bvid);
+            match new_index {
+                Some(new_index) => {
+                    cur_play_info.set_current(new_index).await?;
+                }
+                None => {
+                    cur_play_info.set_current(cur_play_info.index).await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn handle_add_command(add_cmd: AddCommand, proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     let playlist_path = playlist_file()?;
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
@@ -392,9 +428,8 @@ async fn handle_add_command(add_cmd: AddCommand, proxy: &MyPlayerProxy<'_>) -> S
     import_favorite_or_bvid_or_sid(add_cmd.fid, add_cmd.bvid, add_cmd.sid).await?;
     println!("{}", "导入成功".green());
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    let is_running = is_rosesong_running(proxy).await?;
-    if is_running && old_content != new_content {
-        proxy.playlist_change().await?;
+    if old_content != new_content {
+        reload_playlist(proxy).await?;
     }
     Ok(())
 }
@@ -438,13 +473,8 @@ async fn handle_delete_command(del_cmd: DeleteCommand, proxy: &MyPlayerProxy<'_>
     let old_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
     perform_deletion(del_cmd.bvid, del_cmd.sid, del_cmd.owner, del_cmd.all).await?;
     let new_content = fs::read_to_string(&playlist_path).await.unwrap_or_default();
-    let is_running = is_rosesong_running(proxy).await?;
-    if is_running && old_content != new_content {
-        if is_playlist_empty().await? {
-            proxy.playlist_is_empty().await?;
-        } else {
-            proxy.playlist_change().await?;
-        }
+    if old_content != new_content {
+        reload_playlist(proxy).await?;
     }
     Ok(())
 }
@@ -588,7 +618,7 @@ async fn display_playlist(list_cmd: ListCommand) -> StdResult<()> {
     Ok(())
 }
 
-async fn update_season() -> StdResult<()> {
+async fn update_season(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if let Some(mut playlist) = get_playlist().await {
         let retain_tracks = playlist
             .tracks
@@ -602,6 +632,7 @@ async fn update_season() -> StdResult<()> {
             println!("更新合集：{}", season.title.blue());
             import_favorite_or_bvid_or_sid(None, None, Some(season.id)).await?;
         }
+        reload_playlist(proxy).await?;
         println!("{}", "合集更新成功".green());
     }
     Ok(())
