@@ -228,7 +228,7 @@ async fn handle_command(cli: Cli, proxy: MyPlayerProxy<'_>) -> StdResult<()> {
             Commands::Mode(mode_cmd) => handle_mode_command(mode_cmd, &proxy).await,
             Commands::Add(add_cmd) => handle_add_command(add_cmd, &proxy).await,
             Commands::Delete(del_cmd) => handle_delete_command(del_cmd, &proxy).await,
-            Commands::Find(find_cmd) => handle_find_comand(find_cmd).await,
+            Commands::Find(find_cmd) => handle_find_command(find_cmd).await,
             Commands::List(list_cmd) => display_playlist(list_cmd).await,
             Commands::Update => update_season(&proxy).await,
             Commands::Start => start_rosesong(&proxy).await,
@@ -573,7 +573,7 @@ async fn perform_deletion(
     Ok(())
 }
 
-async fn handle_find_comand(find_cmd: FindCommand) -> StdResult<()> {
+async fn handle_find_command(find_cmd: FindCommand) -> StdResult<()> {
     let playlist = get_playlist().await;
     if let Some(playlist) = playlist {
         let mut results = playlist.tracks;
@@ -620,6 +620,7 @@ async fn display_playlist(list_cmd: ListCommand) -> StdResult<()> {
 
 async fn update_season(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
     if let Some(mut playlist) = get_playlist().await {
+        // clean all season songs
         let retain_tracks = playlist
             .tracks
             .clone()
@@ -628,9 +629,15 @@ async fn update_season(proxy: &MyPlayerProxy<'_>) -> StdResult<()> {
             .collect::<Vec<Track>>();
         playlist.tracks = retain_tracks;
         save_playlist_to_file(&playlist).await?;
+        // starting update season songs
         for season in playlist.seasons {
             println!("更新合集：{}", season.title.blue());
-            import_favorite_or_bvid_or_sid(None, None, Some(season.id)).await?;
+            if let Err(e) = import_favorite_or_bvid_or_sid(None, None, Some(season.id)).await {
+                eprintln!(
+                    "{}",
+                    format!("更新合集[{}]失败：{}", season.title.blue(), e).red()
+                );
+            }
         }
         reload_playlist(proxy).await?;
         println!("{}", "合集更新成功".green());
@@ -732,7 +739,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
     println!("全部歌曲: {playlist_status}\n");
 
     if let Some(season) = current_play_season {
-        let current_tracks_lenght = if is_playlist_empty {
+        let current_tracks_length = if is_playlist_empty {
             "空".red()
         } else {
             format!(
@@ -743,7 +750,7 @@ async fn display_status(proxy: &MyPlayerProxy<'_>) -> Result<(), AppError> {
         };
         println!("{}", "[当前合集信息]".blue().bold());
         println!("ID：{}", season.id.to_string().yellow());
-        println!("全部歌曲：{current_tracks_lenght}");
+        println!("全部歌曲：{current_tracks_length}");
         println!("标题：{}", season.title.to_string().yellow());
         println!("简介：{}", season.intro.to_string().yellow());
         println!("up主：{}\n", season.owner.yellow());

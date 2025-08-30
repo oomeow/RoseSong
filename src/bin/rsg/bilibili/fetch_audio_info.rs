@@ -131,7 +131,7 @@ pub async fn fetch_bvids_from_fid(client: &Client, fid: &str) -> Result<Vec<Stri
     })?;
     let bvids: Vec<String> = json["data"]
         .as_array()
-        .ok_or_else(|| {
+        .ok_or({
             eprintln!("Failed to find 'data' array in response from {url}");
             AppError::DataParsing("数据中缺少 bvids 数组".to_string())
         })?
