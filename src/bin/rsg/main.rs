@@ -538,7 +538,14 @@ async fn perform_deletion(
     }
 
     if tracks_to_delete.is_empty() {
-        println!("{}", "没有找到符合条件的track".black());
+        if let Some(sid) = sid {
+            println!("该合集下没有 track");
+            playlist.seasons.retain(|s| s.id != sid);
+            save_playlist_to_file(&playlist).await?;
+            println!("{}", "删除合集成功".green());
+        } else {
+            println!("{}", "没有找到符合条件的 track".black());
+        }
         return Ok(());
     }
     print!(
@@ -558,12 +565,13 @@ async fn perform_deletion(
             .tracks
             .retain(|track| !tracks_to_delete.contains(track));
         // retain seasons
-        let exist_seasons = playlist
+        let exists_seasons = playlist
             .tracks
             .iter()
             .filter_map(|t| t.sid.clone())
             .collect::<HashSet<String>>();
-        playlist.seasons.retain(|s| exist_seasons.contains(&s.id));
+        // retain seasons
+        playlist.seasons.retain(|s| exists_seasons.contains(&s.id));
         // save to file
         save_playlist_to_file(&playlist).await?;
         println!("{}", "删除成功".green());
